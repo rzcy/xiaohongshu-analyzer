@@ -431,15 +431,17 @@ if btn:
         level = "数据不足"
 
     # ---- 媒体展示 ----
-    if images or video:
+    img_urls = [img.get("url", "") for img in images if img.get("url")] if images else []
+    has_video = video and video.get("url")
+
+    if img_urls or has_video:
         st.markdown("---")
         st.markdown("### 🖼️ 媒体内容")
         st.caption("⚠️ 媒体内容来自小红书CDN，链接有时效性，仅临时有效")
 
         # 图片画廊
-        if images:
+        if img_urls:
             st.markdown("**图片**")
-            img_urls = [img.get("url", "") for img in images if img.get("url")]
             # 每行3张图
             for row_start in range(0, len(img_urls), 3):
                 row_imgs = img_urls[row_start:row_start + 3]
@@ -452,7 +454,7 @@ if btn:
                             st.info(f"图片 {row_start + idx + 1} 加载失败（链接可能已过期）")
 
         # 视频播放
-        if video and video.get("url"):
+        if has_video:
             st.markdown("**视频**")
             duration = video.get("duration", 0)
             height = video.get("height", 0)
