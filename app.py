@@ -27,14 +27,12 @@ with st.sidebar:
         pass
     api_key = st.text_input("DeepSeek API Key", value=default_key, type="password",
                             help="[点此免费注册获取](https://platform.deepseek.com)")
-    api_base = st.text_input("API Base URL", value="https://api.deepseek.com")
     model = st.text_input("模型", value="deepseek-chat")
     category = st.selectbox(
         "📂 笔记品类（可选，提升分析精准度）",
         ["通用", "美妆", "穿搭", "美食", "家居", "母婴", "职场", "旅行"]
     )
-    st.divider()
-    st.caption("单次分析成本 ≈ ¥0.002")
+    api_base = "https://api.deepseek.com"
 
 
 # ============ 书签脚本（增强版：提取更多字段） ============
