@@ -442,16 +442,17 @@ if btn:
         # 图片画廊
         if img_urls:
             st.markdown("**图片**")
-            # 每行3张图
+            # 每行3张图，使用 HTML img 标签绕过防盗链
             for row_start in range(0, len(img_urls), 3):
                 row_imgs = img_urls[row_start:row_start + 3]
                 cols = st.columns(3)
                 for idx, url in enumerate(row_imgs):
                     with cols[idx]:
-                        try:
-                            st.image(url, use_container_width=True)
-                        except Exception:
-                            st.info(f"图片 {row_start + idx + 1} 加载失败（链接可能已过期）")
+                        st.markdown(
+                            f'<img src="{url}" referrerpolicy="no-referrer" '
+                            f'style="width:100%;border-radius:8px;" />',
+                            unsafe_allow_html=True
+                        )
 
         # 视频播放
         if has_video:
