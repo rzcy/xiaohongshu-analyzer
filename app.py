@@ -215,28 +215,72 @@ def parse_input(text: str) -> dict:
     return None
 
 
-def split_ai_result(sections_text: str) -> list[tuple[str, str]]:
-    """将 AI 返回的 Markdown 按 ## 标题分割成 (标题, 内容) 列表"""
+def parse_ai_sections(markdown_text: str) -> dict:
+    """将 AI 返回的 Markdown 按 ## 分块，映射到各维度"""
     import re
-    sections = []
-    # 按 ## 开头的行分割
-    parts = re.split(r'\n(?=## )', sections_text)
+    sections = {}
+    parts = re.split(r'\n(?=## )', markdown_text.strip())
+
     for part in parts:
         part = part.strip()
         if not part:
             continue
-        # 提取标题行
         lines = part.split('\n', 1)
         title = lines[0].lstrip('#').strip()
         content = lines[1].strip() if len(lines) > 1 else ""
-        if title:
-            sections.append((title, content))
 
-    # 如果分割失败（AI 没有按格式输出），整体作为一个区块
-    if not sections:
-        sections = [("分析结果", sections_text)]
+        # 映射到标签名
+        if "选题" in title:
+            sections["📋 选题评分"] = content
+        elif "标题" in title:
+            sections["📝 标题拆解"] = content
+        elif "封面" in title or "首图" in title:
+            sections["🖼️ 封面策略"] = content
+        elif "内容" in title or "结构" in title:
+            sections["📚 内容结构"] = content
+        elif "互动" in title:
+            sections["💬 互动设计"] = content
+        elif "算法" in title:
+            sections["🔍 算法适配"] = content
+        elif "行动" in title or "建议" in title:
+            sections["💡 行动建议"] = content
 
     return sections
+
+
+def extract_summary_from_sections(sections: dict) -> tuple:
+    """从各维度中提取摘要信息：(评分, 评分理由, top3建议列表)"""
+    import re
+
+    # 提取选题评分
+    score_text = sections.get("📋 选题评分", "")
+    score_match = re.search(r'(\d+(?:\.\d+)?)\s*/\s*10', score_text)
+    ai_score = score_match.group(1) if score_match else "N/A"
+
+    # 提取评分理由（第一段非空文本）
+    reason = ""
+    for line in score_text.split('\n'):
+        line = line.strip()
+        if line and not line.startswith('#') and not line.startswith('|') and not line.startswith('---'):
+            reason = line[:100]  # 截取前100字
+            break
+
+    # 提取行动建议（前3条）
+    advice_text = sections.get("💡 行动建议", "")
+    recommendations = []
+    for line in advice_text.split('\n'):
+        line = line.strip()
+        if re.match(r'^\d+[\.\、]', line):
+            # 去掉序号
+            rec = re.sub(r'^\d+[\.\、]\s*', '', line)
+            # 去掉 markdown 加粗
+            rec = re.sub(r'\*\*(.*?)\*\*', r'\1', rec)
+            if rec:
+                recommendations.append(rec[:80])  # 截取前80字
+            if len(recommendations) >= 3:
+                break
+
+    return ai_score, reason, recommendations
 
 
 def convert_md_to_html(md_text: str) -> str:
@@ -556,23 +600,50 @@ if btn:
             )
             ai_result = resp.choices[0].message.content
 
-            # 按 ## 标题分割成各个分析模块
-            sections = split_ai_result(sections_text=ai_result)
+            # 解析 AI 结果
+            sections = parse_ai_sections(ai_result)
 
-            # 尝试提取评分信息作为总结行
-            for s_title, s_content in sections:
-                if "选题评分" in s_title or "评分" in s_title:
-                    # 提取第一行作为简要总结
-                    first_line = s_content.split('\n')[0].strip() if s_content else ""
-                    if first_line:
-                        st.info(f"📋 **快速总结**：{first_line}")
-                    break
+            if not sections:
+                # fallback：解析失败时直接展示原文
+                st.markdown(ai_result)
+            else:
+                # === 快速摘要卡 ===
+                ai_score, reason, recommendations = extract_summary_from_sections(sections)
 
-            # 用 expander 分区展示
-            for section_title, section_content in sections:
-                expanded = ("选题评分" in section_title or "行动建议" in section_title)
-                with st.expander(section_title, expanded=expanded):
-                    st.markdown(section_content)
+                # 摘要卡容器
+                st.markdown("#### 🎯 快速摘要")
+                col1, col2 = st.columns([1, 2])
+
+                with col1:
+                    st.metric("AI 选题评分", f"{ai_score}/10")
+                    if reason:
+                        st.caption(reason)
+
+                with col2:
+                    if recommendations:
+                        st.markdown("**💡 Top 行动建议：**")
+                        for i, rec in enumerate(recommendations, 1):
+                            st.markdown(f"{i}. {rec}")
+                    else:
+                        st.caption("暂未提取到行动建议")
+
+                # === 标签页详情 ===
+                st.markdown("---")
+                st.markdown("#### 📖 详细分析")
+
+                # 按固定顺序排列标签
+                tab_order = ["📋 选题评分", "📝 标题拆解", "💬 互动设计",
+                             "📚 内容结构", "🔍 算法适配", "🖼️ 封面策略", "💡 行动建议"]
+                available_tabs = [t for t in tab_order if t in sections]
+
+                if available_tabs:
+                    tabs = st.tabs(available_tabs)
+                    for tab, tab_name in zip(tabs, available_tabs):
+                        with tab:
+                            st.markdown(sections[tab_name])
+                else:
+                    # 标签也失败的 fallback
+                    st.markdown(ai_result)
 
             # ---- 导出 HTML 报告 ----
             st.markdown("---")
