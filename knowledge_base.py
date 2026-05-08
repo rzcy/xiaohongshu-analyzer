@@ -2,6 +2,7 @@
 小红书爆款分析 - 三层 Prompt 工程知识库
 包含：SYSTEM_PROMPT / KNOWLEDGE_BASE / FEW_SHOT_EXAMPLES
 """
+from __future__ import annotations
 
 # =====================================================================
 # 第一层：结构化系统提示词

@@ -656,19 +656,35 @@ if btn:
 
     # 使用三层增强 prompt
     cat = category if category != "通用" else ""
-    messages = get_full_prompt(
-        title=title,
-        content=data.get("content", ""),
-        tags=tag_str,
-        likes=likes, collects=collects, comments=comments, shares=shares,
-        note_type="视频" if note_type == "video" else "图文",
-        image_count=image_count,
-        score=score, level=level,
-        data_traits=data_traits_str,
-        media_info=media_info_str,
-        category=cat,
-        dimensions=selected_dims if len(selected_dims) < len(all_dimensions) else None,
-    )
+    dims_param = selected_dims if len(selected_dims) < len(all_dimensions) else None
+    try:
+        messages = get_full_prompt(
+            title=title,
+            content=data.get("content", ""),
+            tags=tag_str,
+            likes=likes, collects=collects, comments=comments, shares=shares,
+            note_type="视频" if note_type == "video" else "图文",
+            image_count=image_count,
+            score=score, level=level,
+            data_traits=data_traits_str,
+            media_info=media_info_str,
+            category=cat,
+            dimensions=dims_param,
+        )
+    except TypeError:
+        # 兼容旧版 knowledge_base.py（无 dimensions 参数）
+        messages = get_full_prompt(
+            title=title,
+            content=data.get("content", ""),
+            tags=tag_str,
+            likes=likes, collects=collects, comments=comments, shares=shares,
+            note_type="视频" if note_type == "video" else "图文",
+            image_count=image_count,
+            score=score, level=level,
+            data_traits=data_traits_str,
+            media_info=media_info_str,
+            category=cat,
+        )
 
     with st.spinner("AI 深度分析中（三层增强），约 20 秒..."):
         try:
