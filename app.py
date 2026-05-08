@@ -228,22 +228,24 @@ def parse_ai_sections(markdown_text: str) -> dict:
         lines = part.split('\n', 1)
         title = lines[0].lstrip('#').strip()
         content = lines[1].strip() if len(lines) > 1 else ""
+        # 将标题行也保留到内容中（AI可能把评分写在标题里）
+        full_content = title + "\n" + content if content else title
 
         # 映射到标签名
         if "选题" in title:
-            sections["📋 选题评分"] = content
+            sections["📋 选题评分"] = full_content
         elif "标题" in title:
-            sections["📝 标题拆解"] = content
+            sections["📝 标题拆解"] = full_content
         elif "封面" in title or "首图" in title:
-            sections["🖼️ 封面策略"] = content
+            sections["🖼️ 封面策略"] = full_content
         elif "内容" in title or "结构" in title:
-            sections["📚 内容结构"] = content
+            sections["📚 内容结构"] = full_content
         elif "互动" in title:
-            sections["💬 互动设计"] = content
+            sections["💬 互动设计"] = full_content
         elif "算法" in title:
-            sections["🔍 算法适配"] = content
+            sections["🔍 算法适配"] = full_content
         elif "行动" in title or "建议" in title:
-            sections["💡 行动建议"] = content
+            sections["💡 行动建议"] = full_content
 
     return sections
 
@@ -479,62 +481,51 @@ if btn:
     has_video = video and video.get("url")
 
     if img_urls or has_video:
-        st.markdown("---")
-        st.markdown("### 🖼️ 媒体内容")
-        st.caption("⚠️ 媒体内容来自小红书CDN，链接有时效性，仅临时有效")
-
-        # 图片画廊
-        if img_urls:
-            st.markdown("**图片**")
-            # 每行3张图，使用 HTML img 标签绕过防盗链
-            for row_start in range(0, len(img_urls), 3):
-                row_imgs = img_urls[row_start:row_start + 3]
-                cols = st.columns(3)
-                for idx, url in enumerate(row_imgs):
-                    with cols[idx]:
-                        st.markdown(
-                            f'<img src="{url}" referrerpolicy="no-referrer" '
-                            f'style="width:100%;border-radius:8px;" />',
-                            unsafe_allow_html=True
-                        )
-
-        # 视频播放
-        if has_video:
-            st.markdown("**视频**")
-            duration = video.get("duration", 0)
-            height = video.get("height", 0)
-            info_parts = []
-            if duration:
-                minutes, seconds = divmod(int(duration), 60)
-                info_parts.append(f"时长 {minutes}:{seconds:02d}")
-            if height:
-                info_parts.append(f"分辨率 {height}p")
-            if info_parts:
-                st.caption(" | ".join(info_parts))
-            try:
-                st.video(video["url"])
-            except Exception:
-                st.info("视频加载失败（链接可能已过期）")
+        media_label = f"🖼️ 媒体内容（{len(img_urls)}张图{'、含视频' if has_video else ''}）"
+        with st.expander(media_label, expanded=False):
+            st.caption("⚠️ 媒体来自小红书CDN，链接有时效性")
+            # 图片画廊
+            if img_urls:
+                for row_start in range(0, len(img_urls), 3):
+                    row_imgs = img_urls[row_start:row_start + 3]
+                    cols = st.columns(3)
+                    for idx, url in enumerate(row_imgs):
+                        with cols[idx]:
+                            st.markdown(
+                                f'<img src="{url}" referrerpolicy="no-referrer" '
+                                f'style="width:100%;border-radius:8px;" />',
+                                unsafe_allow_html=True
+                            )
+            # 视频播放
+            if has_video:
+                duration = video.get("duration", 0)
+                height = video.get("height", 0)
+                info_parts = []
+                if duration:
+                    minutes, seconds = divmod(int(duration), 60)
+                    info_parts.append(f"时长 {minutes}:{seconds:02d}")
+                if height:
+                    info_parts.append(f"分辨率 {height}p")
+                if info_parts:
+                    st.caption("视频：" + " | ".join(info_parts))
+                try:
+                    st.video(video["url"])
+                except Exception:
+                    st.info("视频加载失败（链接可能已过期）")
 
     # ---- 数据洞察（纯算法，不依赖 AI） ----
-    st.markdown("---")
-    st.markdown("### 📊 数据洞察")
-
     engagement_insights = analyze_engagement(likes, collects, comments, shares)
     content_traits = get_content_type_analysis(likes, collects, comments, note_type, image_count)
 
-    if engagement_insights:
-        for emoji_title, detail in engagement_insights:
-            st.markdown(f"**{emoji_title}**")
-            st.markdown(f"> {detail}")
-            st.markdown("")
-    else:
-        st.info("互动数据不足，暂无法生成数据洞察")
-
-    if content_traits:
-        st.markdown("**内容特征**")
-        for trait in content_traits:
-            st.markdown(f"- {trait}")
+    insight_summary = f"{len(engagement_insights)}条互动洞察、{len(content_traits)}条内容特征" if (engagement_insights or content_traits) else "数据不足"
+    with st.expander(f"📊 数据洞察（{insight_summary}）", expanded=False):
+        if engagement_insights:
+            for emoji_title, detail in engagement_insights:
+                st.markdown(f"**{emoji_title}**　{detail}")
+        else:
+            st.info("互动数据不足，暂无法生成数据洞察")
+        if content_traits:
+            st.markdown("**内容特征：**" + "　|　".join(content_traits))
 
     # ---- AI 拆解（三层增强） ----
     st.markdown("---")
