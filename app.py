@@ -32,6 +32,14 @@ with st.sidebar:
         "📂 笔记品类（可选，提升分析精准度）",
         ["通用", "美妆", "穿搭", "美食", "家居", "母婴", "职场", "旅行"]
     )
+    # 分析维度定制
+    all_dimensions = ["选题评分", "标题拆解", "封面/首图策略", "内容结构拆解", "互动设计分析", "平台算法适配度", "行动建议"]
+    with st.expander("📐 分析维度定制", expanded=False):
+        selected_dims = st.multiselect(
+            "去掉不需要的维度，AI 只输出选中部分",
+            all_dimensions,
+            default=all_dimensions,
+        )
     api_base = "https://api.deepseek.com"
 
 
@@ -226,24 +234,31 @@ def parse_ai_sections(markdown_text: str) -> dict:
         lines = part.split('\n', 1)
         title = lines[0].lstrip('#').strip()
         content = lines[1].strip() if len(lines) > 1 else ""
-        # 将标题行也保留到内容中（AI可能把评分写在标题里）
-        full_content = title + "\n" + content if content else title
+
+        # 从标题中提取评分等关键信息（如 "1. 选题评分：9/10" → 提取 "9/10"）
+        score_in_title = ""
+        score_m = re.search(r'(\d+(?:\.\d+)?)\s*/\s*10', title)
+        if score_m:
+            score_in_title = f"**综合评分：{score_m.group(0)}**\n\n"
+
+        # 内容 = 标题中的评分信息（如有）+ 正文（不含重复的序号标题）
+        display_content = score_in_title + content if content else score_in_title or title
 
         # 映射到标签名
         if "选题" in title:
-            sections["📋 选题评分"] = full_content
+            sections["📋 选题评分"] = display_content
         elif "标题" in title:
-            sections["📝 标题拆解"] = full_content
+            sections["📝 标题拆解"] = display_content
         elif "封面" in title or "首图" in title:
-            sections["🖼️ 封面策略"] = full_content
+            sections["🖼️ 封面策略"] = display_content
         elif "内容" in title or "结构" in title:
-            sections["📚 内容结构"] = full_content
+            sections["📚 内容结构"] = display_content
         elif "互动" in title:
-            sections["💬 互动设计"] = full_content
+            sections["💬 互动设计"] = display_content
         elif "算法" in title:
-            sections["🔍 算法适配"] = full_content
+            sections["🔍 算法适配"] = display_content
         elif "行动" in title or "建议" in title:
-            sections["💡 行动建议"] = full_content
+            sections["💡 行动建议"] = display_content
 
     return sections
 
@@ -381,7 +396,71 @@ def generate_html_report(title, author, likes, collects, comments, shares,
 
 
 # ============ 主界面 ============
+
+# ============ 功能介绍 ============
 st.markdown("---")
+col1, col2, col3 = st.columns(3)
+with col1:
+    st.markdown("##### 📊 数据洞察")
+    st.caption("自动计算爆款指数、互动率分析、内容特征识别")
+with col2:
+    st.markdown("##### 🤖 AI 深度拆解")
+    st.caption("7维度专业分析：选题/标题/封面/内容/互动/算法/建议")
+with col3:
+    st.markdown("##### 💡 可执行建议")
+    st.caption("不说空话，每条建议带模板、带数字、直接能用")
+st.markdown("---")
+
+# ============ 示例分析结果 ============
+with st.expander("👀 查看示例分析效果", expanded=False):
+    st.markdown("**示例笔记**：《这5个平价护肤品，学生党闭眼入！》")
+    st.caption("点赞 2.3万 | 收藏 1.8万 | 评论 3600")
+    
+    # 示例摘要卡
+    st.markdown("---")
+    st.markdown("#### 🎯 快速摘要")
+    demo_col1, demo_col2 = st.columns([1, 2])
+    with demo_col1:
+        st.metric("AI 选题评分", "9/10")
+        st.caption("精准命中学生群体护肤刚需，搜索+浏览双通道流量")
+    with demo_col2:
+        st.markdown("**💡 Top 行动建议：**")
+        st.markdown("1. 标题加入「2024最新」时效词，抢占搜索流量")
+        st.markdown("2. 正文第3段加引导「你们用的哪款？评论区分享」提升评论率")
+        st.markdown("3. 封面加价格对比数据「¥39 vs ¥390」提升点击率")
+    
+    # 示例标签页
+    st.markdown("---")
+    st.markdown("#### 📖 详细分析预览")
+    demo_tabs = st.tabs(["📋 选题评分", "📝 标题拆解", "💬 互动设计", "💡 行动建议"])
+    with demo_tabs[0]:
+        st.markdown("""**9/10 - 优质选题**
+
+- **选题类型**：好物推荐型 × 痛点解决型（高复合价值）
+- **目标人群**：学生群体（体量大、消费决策链短、分享意愿强）
+- **流量模式**：搜索+浏览双通道 ——\u201c学生 护肤品 平价\u201d为高搜索量长尾词，同时标题的数字+身份标签适合信息流推荐""")
+    with demo_tabs[1]:
+        st.markdown("""**标题公式拆解**
+
+- **钩子技巧**：数字锚定（\u201c5个\u201d）+ 身份共鸣（\u201c学生党\u201d）+ 利益承诺（\u201c闭眼入\u201d）
+- **字数**：19字（最优区间18-25字 ✓）
+- **SEO布局**：\u201c平价护肤品\u201d+\u201c学生党\u201d 两个高搜索量关键词在前半段
+- **可复用模板**：「这X个[品类关键词]，[目标人群]闭眼入！」""")
+    with demo_tabs[2]:
+        st.markdown("""**高互动驱动分析**
+
+- **收藏驱动**：清单体+具体产品名+价格 → 用户\u201c存着以后买\u201d → 收藏率 78%（极高）
+- **评论驱动**：产品选择天然引发讨论 → \u201c我用的是XX更好用\u201d → 3600条评论
+- **转发动机**：利他分享 → \u201c这个适合我室友/闺蜜\u201d → 社交推荐链""")
+    with demo_tabs[3]:
+        st.markdown("""**可执行建议（示例）**
+
+1. **标题优化**：开头加「2024最新」→ \u201c2024最新！这5个平价护肤品，学生党闭眼入\u201d，预计搜索点击率提升20%
+2. **引导评论**：正文结尾加\u201c你们还有什么平价好物？评论区分享一下🙏\u201d，预计评论数增长15%
+3. **封面强化**：加一行\u201c均价¥39\u201d的价格标签，制造对比锚点，预计点击率提升25%
+4. **追加SEO**：标签增加\u201c大学生必备\u201d\u201c宿舍好物\u201d，扩大搜索流量入口""")
+    
+    st.info("👆 以上是示例效果，粘贴你的笔记数据即可获得同样深度的个性化分析！")
 
 # ---- 使用说明 ----
 with st.expander("📖 首次使用？1分钟设置（只需一次）", expanded=False):
@@ -394,6 +473,19 @@ with st.expander("📖 首次使用？1分钟设置（只需一次）", expanded
 4. 网址栏粘贴下面这段代码：
 """)
     st.code(BOOKMARKLET, language=None)
+
+    # 图文教程
+    st.markdown("**📸 图文教程（点击可放大）：**")
+    tutorial_cols = st.columns(4)
+    with tutorial_cols[0]:
+        st.image("resourse/添加网页.png", caption="① 添加网页", use_container_width=True)
+    with tutorial_cols[1]:
+        st.image("resourse/添加书签.png", caption="② 添加书签", use_container_width=True)
+    with tutorial_cols[2]:
+        st.image("resourse/提取笔记.png", caption="③ 提取笔记", use_container_width=True)
+    with tutorial_cols[3]:
+        st.image("resourse/粘贴.png", caption="④ 粘贴数据", use_container_width=True)
+
     st.markdown("""
 **第二步：使用方式**
 
@@ -575,6 +667,7 @@ if btn:
         data_traits=data_traits_str,
         media_info=media_info_str,
         category=cat,
+        dimensions=selected_dims if len(selected_dims) < len(all_dimensions) else None,
     )
 
     with st.spinner("AI 深度分析中（三层增强），约 20 秒..."):
@@ -620,10 +713,13 @@ if btn:
                 st.markdown("---")
                 st.markdown("#### 📖 详细分析")
 
-                # 按固定顺序排列标签
+                # 按固定顺序排列标签（行动建议已在摘要卡展示，不重复）
                 tab_order = ["📋 选题评分", "📝 标题拆解", "💬 互动设计",
-                             "📚 内容结构", "🔍 算法适配", "🖼️ 封面策略", "💡 行动建议"]
+                             "📚 内容结构", "🔍 算法适配", "🖼️ 封面策略"]
                 available_tabs = [t for t in tab_order if t in sections]
+                # 如果摘要卡未提取到建议，保留行动建议tab
+                if not recommendations and "💡 行动建议" in sections:
+                    available_tabs.append("💡 行动建议")
 
                 if available_tabs:
                     tabs = st.tabs(available_tabs)
