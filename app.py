@@ -39,9 +39,13 @@ with st.sidebar:
         default_key = st.secrets.get("DEEPSEEK_API_KEY", "")
     except Exception:
         pass
-    api_key = st.text_input("DeepSeek API Key", value=default_key, type="password",
-                            help="[点此免费注册获取](https://platform.deepseek.com)")
-    model = st.text_input("模型", value="deepseek-chat")
+    # API Key 优先从 secrets 读取，无需用户手动输入
+    if default_key:
+        api_key = default_key
+    else:
+        api_key = st.text_input("DeepSeek API Key", type="password",
+                                help="[点此免费注册获取](https://platform.deepseek.com)")
+    model = "deepseek-chat"
     category = st.selectbox(
         "📂 笔记品类（可选，提升分析精准度）",
         ["通用", "美妆", "穿搭", "美食", "家居", "母婴", "职场", "旅行"]
