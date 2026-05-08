@@ -6,9 +6,11 @@
 
 import json
 import math
+from datetime import datetime, timezone
 from collections import Counter
 import streamlit as st
 from openai import OpenAI
+from knowledge_base import get_full_prompt
 
 # ============ 页面配置 ============
 st.set_page_config(page_title="小红书爆款拆解器", page_icon="🔥", layout="centered")
@@ -27,6 +29,10 @@ with st.sidebar:
                             help="[点此免费注册获取](https://platform.deepseek.com)")
     api_base = st.text_input("API Base URL", value="https://api.deepseek.com")
     model = st.text_input("模型", value="deepseek-chat")
+    category = st.selectbox(
+        "📂 笔记品类（可选，提升分析精准度）",
+        ["通用", "美妆", "穿搭", "美食", "家居", "母婴", "职场", "旅行"]
+    )
     st.divider()
     st.caption("单次分析成本 ≈ ¥0.002")
 
@@ -36,6 +42,90 @@ BOOKMARKLET = """javascript:void(function(){try{var s=window.__INITIAL_STATE__;i
 
 
 # ============ 数据分析函数 ============
+def extract_hours_from_timestamp(time_value) -> float:
+    """从笔记的 time 字段计算距现在的小时数
+    
+    支持格式：
+    - 数字时间戳（秒级/毫秒级）
+    - ISO 格式字符串
+    - 小红书中文相对时间："刚刚"、"X分钟前"、"X小时前"、"X天前"、"昨天 HH:MM"
+    - 小红书日期格式："MM-DD"、"YYYY-MM-DD"
+    """
+    import re
+    if not time_value:
+        return None
+    try:
+        if isinstance(time_value, str):
+            time_value = time_value.strip()
+            if not time_value:
+                return None
+            
+            # 1. 中文相对时间解析
+            if "刚刚" in time_value:
+                return 0.5
+            
+            m = re.match(r'(\d+)\s*分钟前', time_value)
+            if m:
+                return max(int(m.group(1)) / 60, 0.5)
+            
+            m = re.match(r'(\d+)\s*小时前', time_value)
+            if m:
+                return max(float(m.group(1)), 1)
+            
+            m = re.match(r'(\d+)\s*天前', time_value)
+            if m:
+                return float(m.group(1)) * 24
+            
+            if "昨天" in time_value:
+                return 24.0
+            
+            if "前天" in time_value:
+                return 48.0
+            
+            # 2. 日期格式：YYYY-MM-DD 或 MM-DD
+            m = re.match(r'(\d{4})-(\d{1,2})-(\d{1,2})', time_value)
+            if m:
+                dt = datetime(int(m.group(1)), int(m.group(2)), int(m.group(3)),
+                              tzinfo=timezone.utc)
+                seconds_elapsed = datetime.now(timezone.utc).timestamp() - dt.timestamp()
+                return max(seconds_elapsed / 3600, 1)
+            
+            m = re.match(r'(\d{1,2})-(\d{1,2})', time_value)
+            if m:
+                now = datetime.now(timezone.utc)
+                dt = datetime(now.year, int(m.group(1)), int(m.group(2)),
+                              tzinfo=timezone.utc)
+                # 如果算出来是未来时间，说明是去年的
+                if dt > now:
+                    dt = dt.replace(year=now.year - 1)
+                seconds_elapsed = now.timestamp() - dt.timestamp()
+                return max(seconds_elapsed / 3600, 1)
+            
+            # 3. 尝试作为数字时间戳
+            try:
+                timestamp_float = float(time_value)
+            except ValueError:
+                # 4. ISO 格式
+                try:
+                    dt = datetime.fromisoformat(time_value.replace('Z', '+00:00'))
+                    timestamp_float = dt.timestamp()
+                except ValueError:
+                    return None
+        else:
+            timestamp_float = float(time_value)
+
+        # 判断毫秒 vs 秒级时间戳
+        if timestamp_float > 1000000000000:
+            timestamp_float /= 1000
+
+        current_timestamp = datetime.now(timezone.utc).timestamp()
+        seconds_elapsed = current_timestamp - timestamp_float
+        hours = max(seconds_elapsed / 3600, 1)
+        return round(hours, 1)
+    except Exception:
+        return None
+
+
 def calc_viral_score(likes, collects, comments, hours):
     engagement = likes + collects * 1.5 + comments * 2
     hours = max(hours, 1)
@@ -107,7 +197,7 @@ def get_content_type_analysis(likes, collects, comments, note_type, image_count)
         traits.append("🎬 视频笔记（视频完播率是推荐权重关键因子）")
     if image_count >= 6:
         traits.append(f"🖼️ 多图笔记（{image_count}张图，信息密度高，用户停留时间长）")
-    elif image_count <= 2 and note_type != "video":
+    elif 0 < image_count <= 2 and note_type != "video":
         traits.append(f"📝 轻图文（{image_count}张图，靠标题和文字取胜）")
 
     return traits
@@ -125,61 +215,125 @@ def parse_input(text: str) -> dict:
     return None
 
 
-# ============ Prompt（优化版：适应短内容） ============
-PROMPT = """# 角色
-你是一位资深小红书内容策略师，已分析过10000+篇爆款笔记。你的分析以数据为依据，以实操为导向。
+def split_ai_result(sections_text: str) -> list[tuple[str, str]]:
+    """将 AI 返回的 Markdown 按 ## 标题分割成 (标题, 内容) 列表"""
+    import re
+    sections = []
+    # 按 ## 开头的行分割
+    parts = re.split(r'\n(?=## )', sections_text)
+    for part in parts:
+        part = part.strip()
+        if not part:
+            continue
+        # 提取标题行
+        lines = part.split('\n', 1)
+        title = lines[0].lstrip('#').strip()
+        content = lines[1].strip() if len(lines) > 1 else ""
+        if title:
+            sections.append((title, content))
 
-# 任务
-深度拆解这篇小红书笔记，帮博主理解「为什么这种内容能火」以及「如何复用这套打法」。
+    # 如果分割失败（AI 没有按格式输出），整体作为一个区块
+    if not sections:
+        sections = [("分析结果", sections_text)]
 
-# 笔记信息
-- 标题：{title}
-- 正文：{content}
-- 标签：{tags}
-- 互动数据：👍{likes} ⭐{collects} 💬{comments} 🔗{shares}
-- 笔记类型：{note_type}（{image_count}张图）
-- 爆款指数：{score}（{level}）
-- 数据特征：{data_traits}
-- 视觉信息：{media_info}
+    return sections
 
-# 分析要求
 
-## 1. 爆款内核（最重要）
-这篇笔记的「1个核心爆点」是什么？用一句话概括它打动用户的底层逻辑。
-然后分析：
-- 戳中了什么具体场景下的什么需求？
-- 为什么用户愿意点赞/收藏/分享？（结合上面的数据特征来分析）
+def convert_md_to_html(md_text: str) -> str:
+    """简单的 Markdown 到 HTML 转换"""
+    import re
+    html = md_text
+    # 标题
+    html = re.sub(r'^### (.+)$', r'<h3>\1</h3>', html, flags=re.MULTILINE)
+    html = re.sub(r'^## (.+)$', r'<h2>\1</h2>', html, flags=re.MULTILINE)
+    # 加粗
+    html = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', html)
+    # 列表
+    html = re.sub(r'^- (.+)$', r'<li>\1</li>', html, flags=re.MULTILINE)
+    # 引用
+    html = re.sub(r'^> (.+)$', r'<blockquote>\1</blockquote>', html, flags=re.MULTILINE)
+    # 换行
+    html = html.replace('\n\n', '</p><p>').replace('\n', '<br>')
+    html = f'<p>{html}</p>'
+    return html
 
-## 2. 标题拆解
-- 这个标题用了什么心理机制？（好奇心缺口/社交认同/利益承诺/情绪共鸣/反常识）
-- 标题中哪个词/句式是关键触发词？
-- 提炼 2-3 个可直接套用的标题模板：
-  - 模板格式：___（地点/品类）+ ___（程度词）+ ___（行为/结果）
-  - 每个模板给一个具体示例
 
-## 3. 内容策略
-- 这篇采用了什么内容结构？（注意：小红书短内容往往靠「留白」和「图片叙事」取胜）
-- 文案的信息密度策略是什么？（极简引导 vs 密集干货）
-- 正文中哪些词句在引导用户互动？
-- 图片排列策略/视频节奏：图片数量、尺寸比例、排序逻辑如何服务于内容表达？视频类则分析时长和节奏设计。
+def generate_html_report(title, author, likes, collects, comments, shares,
+                         score, level, hours, engagement_insights,
+                         content_traits, ai_result, category) -> str:
+    """生成美观的 HTML 分析报告"""
 
-## 4. 可复用打法
-给出 2 个不同品类博主可以直接套用的仿写方案：
+    html = f"""<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>爆款拆解报告 - {title}</title>
+    <style>
+        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            line-height: 1.8; color: #333; background: #f8f9fa;
+            padding: 40px 20px;
+        }}
+        .container {{ max-width: 800px; margin: 0 auto; background: #fff;
+                     border-radius: 12px; box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+                     padding: 48px; }}
+        .header {{ text-align: center; margin-bottom: 32px; padding-bottom: 24px;
+                  border-bottom: 2px solid #ff4757; }}
+        .header h1 {{ font-size: 24px; color: #ff4757; margin-bottom: 8px; }}
+        .header .subtitle {{ color: #666; font-size: 14px; }}
+        .metrics {{ display: flex; justify-content: space-around; margin: 24px 0;
+                   padding: 20px; background: #fff5f5; border-radius: 8px; }}
+        .metric {{ text-align: center; }}
+        .metric .value {{ font-size: 24px; font-weight: bold; color: #ff4757; }}
+        .metric .label {{ font-size: 12px; color: #666; margin-top: 4px; }}
+        .section {{ margin: 28px 0; }}
+        .section h2 {{ font-size: 18px; color: #333; margin-bottom: 12px;
+                      padding-left: 12px; border-left: 3px solid #ff4757; }}
+        .section h3 {{ font-size: 15px; color: #555; margin: 16px 0 8px; }}
+        .insight {{ background: #f8f9fa; padding: 12px 16px; border-radius: 6px;
+                   margin: 8px 0; border-left: 3px solid #ffa502; }}
+        .ai-content {{ white-space: pre-wrap; }}
+        .ai-content h2 {{ margin-top: 24px; }}
+        .footer {{ text-align: center; margin-top: 40px; padding-top: 20px;
+                  border-top: 1px solid #eee; color: #999; font-size: 12px; }}
+        strong {{ color: #333; }}
+        blockquote {{ border-left: 3px solid #ddd; padding-left: 12px; color: #666; margin: 8px 0; }}
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="header">
+        <h1>🔥 爆款拆解报告</h1>
+        <div class="subtitle">{title} | 作者：{author or '未知'}</div>
+    </div>
 
-**方案A（同品类）：**
-- 标题：（直接可用）
-- 正文话术：（30字以内，模仿原文风格）
-- 关键要素：封面怎么拍、几张图、什么角度
+    <div class="metrics">
+        <div class="metric"><div class="value">{score}</div><div class="label">爆款指数</div></div>
+        <div class="metric"><div class="value">{likes:,}</div><div class="label">点赞</div></div>
+        <div class="metric"><div class="value">{collects:,}</div><div class="label">收藏</div></div>
+        <div class="metric"><div class="value">{comments:,}</div><div class="label">评论</div></div>
+        <div class="metric"><div class="value">{shares:,}</div><div class="label">分享</div></div>
+    </div>
 
-**方案B（跨品类迁移）：**
-- 适用品类：
-- 标题：
-- 套用逻辑：为什么同一套路在其他品类也能火
+    <div class="section">
+        <h2>📊 数据洞察</h2>
+        {''.join(f'<div class="insight"><strong>{t}</strong><br>{d}</div>' for t, d in engagement_insights) if engagement_insights else '<p>互动数据不足</p>'}
+        {('<h3>内容特征</h3><ul>' + ''.join(f'<li>{t}</li>' for t in content_traits) + '</ul>') if content_traits else ''}
+    </div>
 
-# 输出风格
-- 每个点 2-4 句话，不要写成论文
-- 多用「因为...所以...」的因果逻辑，少用形容词
-- 关键结论加粗标注"""
+    <div class="section">
+        <h2>🤖 AI 深度拆解</h2>
+        <div class="ai-content">{convert_md_to_html(ai_result)}</div>
+    </div>
+
+    <div class="footer">
+        由「小红书爆款拆解器」生成 | {category or '通用'}品类
+    </div>
+</div>
+</body>
+</html>"""
+    return html
 
 
 # ============ 主界面 ============
@@ -215,7 +369,6 @@ json_input = st.text_area(
     placeholder='{"title": "...", "content": "...", "likes": 329, ...}',
     label_visibility="collapsed",
 )
-hours = st.slider("⏰ 大约发了多久？", 1, 720, 48, help="用于计算爆款指数，估算即可")
 btn = st.button("🚀 开始拆解", use_container_width=True, type="primary")
 
 # ============ 分析流程 ============
@@ -231,6 +384,18 @@ if btn:
     if not data:
         st.error("无法识别粘贴的内容，请确认是通过书签提取的数据")
         st.stop()
+
+    # ---- 自动计算发布时间 ----
+    hours = extract_hours_from_timestamp(data.get("time"))
+    if hours is None:
+        hours = 48
+        st.caption("⏰ 未检测到发布时间，使用默认值48小时计算爆款指数")
+    else:
+        if hours < 24:
+            st.caption(f"⏰ 发布于约 {hours:.0f} 小时前")
+        else:
+            days = hours / 24
+            st.caption(f"⏰ 发布于约 {days:.1f} 天前")
 
     # ---- 基础信息 ----
     st.markdown("---")
@@ -324,9 +489,9 @@ if btn:
         for trait in content_traits:
             st.markdown(f"- {trait}")
 
-    # ---- AI 拆解 ----
+    # ---- AI 拆解（三层增强） ----
     st.markdown("---")
-    st.markdown("### 🤖 AI 深度拆解")
+    st.markdown("### 🤖 AI 深度拆解（增强版）")
 
     tags = data.get("tags", [])
     tag_str = ", ".join(tags) if tags else "无"
@@ -361,7 +526,9 @@ if btn:
             media_parts.append("含视频")
     media_info_str = "；".join(media_parts) if media_parts else "无媒体信息"
 
-    prompt = PROMPT.format(
+    # 使用三层增强 prompt
+    cat = category if category != "通用" else ""
+    messages = get_full_prompt(
         title=title,
         content=data.get("content", ""),
         tags=tag_str,
@@ -371,18 +538,56 @@ if btn:
         score=score, level=level,
         data_traits=data_traits_str,
         media_info=media_info_str,
+        category=cat,
     )
 
-    with st.spinner("AI 深度分析中，约 15 秒..."):
+    with st.spinner("AI 深度分析中（三层增强），约 20 秒..."):
         try:
             base = f"{api_base}/v1" if not api_base.endswith("/v1") else api_base
             client = OpenAI(api_key=api_key, base_url=base)
             resp = client.chat.completions.create(
                 model=model,
-                messages=[{"role": "user", "content": prompt}],
+                messages=messages,
                 temperature=0.7,
                 max_tokens=3000,
             )
-            st.markdown(resp.choices[0].message.content)
+            ai_result = resp.choices[0].message.content
+
+            # 按 ## 标题分割成各个分析模块
+            sections = split_ai_result(sections_text=ai_result)
+
+            # 尝试提取评分信息作为总结行
+            for s_title, s_content in sections:
+                if "选题评分" in s_title or "评分" in s_title:
+                    # 提取第一行作为简要总结
+                    first_line = s_content.split('\n')[0].strip() if s_content else ""
+                    if first_line:
+                        st.info(f"📋 **快速总结**：{first_line}")
+                    break
+
+            # 用 expander 分区展示
+            for section_title, section_content in sections:
+                expanded = ("选题评分" in section_title or "行动建议" in section_title)
+                with st.expander(section_title, expanded=expanded):
+                    st.markdown(section_content)
+
+            # ---- 导出 HTML 报告 ----
+            st.markdown("---")
+            html_report = generate_html_report(
+                title=title, author=author,
+                likes=likes, collects=collects, comments=comments, shares=shares,
+                score=score, level=level, hours=hours,
+                engagement_insights=engagement_insights,
+                content_traits=content_traits,
+                ai_result=ai_result,
+                category=category,
+            )
+            st.download_button(
+                label="📥 导出分析报告（HTML）",
+                data=html_report,
+                file_name=f"爆款拆解_{title[:20]}.html",
+                mime="text/html",
+                use_container_width=True,
+            )
         except Exception as e:
             st.error(f"分析失败：{e}")
