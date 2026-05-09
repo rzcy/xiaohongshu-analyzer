@@ -20,6 +20,13 @@ except Exception:
 
 # ============ 页面配置 ============
 st.set_page_config(page_title="小红书爆款拆解器", page_icon="🔥", layout="centered")
+
+# 全局禁止发送 Referer（解决小红书 CDN 防盗链，兼容手机浏览器）
+st.markdown(
+    '<meta name="referrer" content="no-referrer">',
+    unsafe_allow_html=True
+)
+
 st.title("🔥 小红书爆款拆解器")
 st.caption("一键提取 + 数据洞察 + AI 深度拆解，帮你看懂爆款为什么火")
 
