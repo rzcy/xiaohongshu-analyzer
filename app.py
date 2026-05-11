@@ -164,17 +164,17 @@ def calc_viral_score(likes, collects, comments, hours):
     engagement = likes + collects * 1.5 + comments * 2
     hours = max(hours, 1)
     density = engagement / hours
-    fan_factor = math.log10(max(100, 100))
-    score = density / fan_factor * 10
+    # 对数归一化到 0-100
+    score = min(100, math.log10(max(1, density)) * 30)
     return round(score, 1)
 
 
 def get_level(score):
-    if score >= 50:
+    if score >= 80:
         return "🔥🔥🔥 超级爆款"
-    elif score >= 20:
+    elif score >= 60:
         return "🔥🔥 准爆款"
-    elif score >= 8:
+    elif score >= 40:
         return "🔥 表现优秀"
     else:
         return "📊 正常水平"
