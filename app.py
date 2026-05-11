@@ -1196,7 +1196,7 @@ if "analysis_result" in st.session_state:
 </style>
 <div style="text-align:center; padding:8px;">
     <button id="capture-btn" onclick="captureReport()">
-        \ud83d\udcf8 \u5bfc\u51fa\u62a5\u544a\u622a\u56fe
+        &#128248; Export Screenshot
     </button>
     <p id="capture-status" style="color:#666; font-size:12px; margin-top:6px; display:none;"></p>
 </div>
@@ -1219,8 +1219,8 @@ function captureReport() {{
 
     status.style.display = 'block';
     btn.disabled = true;
-    btn.innerHTML = '\u23f3 \u6b63\u5728\u751f\u6210\u622a\u56fe...';
-    status.textContent = '\u6b63\u5728\u6e32\u67d3\uff0c\u8bf7\u7a0d\u5019...';
+    btn.innerHTML = '&#9203; Generating...';
+    status.textContent = 'Rendering report, please wait...';
     status.style.color = '#666';
 
     // 用 TextDecoder 正确解码 UTF-8
@@ -1237,17 +1237,17 @@ function captureReport() {{
             width: 1200
         }}).then(function(canvas) {{
             var link = document.createElement('a');
-            link.download = '\u7206\u6b3e\u62c6\u89e3\u62a5\u544a.png';
+            link.download = 'report.png';
             link.href = canvas.toDataURL('image/png');
             link.click();
             btn.disabled = false;
-            btn.innerHTML = '\ud83d\udcf8 \u5bfc\u51fa\u62a5\u544a\u622a\u56fe';
-            status.textContent = '\u2705 \u622a\u56fe\u5df2\u4e0b\u8f7d\uff01';
+            btn.innerHTML = '&#128248; Export Screenshot';
+            status.textContent = 'Done! Screenshot downloaded.';
             status.style.color = '#10b981';
         }}).catch(function(err) {{
             btn.disabled = false;
-            btn.innerHTML = '\ud83d\udcf8 \u5bfc\u51fa\u62a5\u544a\u622a\u56fe';
-            status.textContent = '\u274c \u5931\u8d25\uff1a' + err.message;
+            btn.innerHTML = '&#128248; Export Screenshot';
+            status.textContent = 'Failed: ' + err.message;
             status.style.color = '#ef4444';
         }});
     }}, 800);
