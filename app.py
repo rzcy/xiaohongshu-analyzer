@@ -253,8 +253,8 @@ def parse_executive_summary(markdown_text: str) -> dict:
     """从AI输出中提取前置摘要信息（爆款指数、一句话总结、Top3行动）"""
     import re
     result = {
-        "score": None,        # 如 "4223"
-        "score_max": 5000,
+        "score": None,        # 如 "85"
+        "score_max": 100,
         "score_detail": "",   # 括号内的计分说明
         "summary": "",        # 一句话总结
         "top3_actions": [],   # 3条行动建议列表
@@ -402,7 +402,7 @@ def generate_html_report(title, author, likes, collects, comments, shares,
         try:
             exec_summary = parse_executive_summary(ai_result)
         except Exception:
-            exec_summary = {"score": None, "score_max": 5000, "score_detail": "",
+            exec_summary = {"score": None, "score_max": 100, "score_detail": "",
                             "summary": "", "top3_actions": []}
 
     # 解析7维度分析
@@ -410,7 +410,7 @@ def generate_html_report(title, author, likes, collects, comments, shares,
 
     # 爆款指数数值
     es_score = exec_summary.get("score")
-    es_max = exec_summary.get("score_max", 5000)
+    es_max = exec_summary.get("score_max", 100)
     es_detail = exec_summary.get("score_detail", "")
     es_summary = exec_summary.get("summary", "")
     es_actions = exec_summary.get("top3_actions", [])
@@ -1186,19 +1186,26 @@ if "analysis_result" in st.session_state:
 
     screenshot_component = f'''
 <style>
+  body {{ margin: 0; padding: 0; background: transparent !important; overflow: hidden; }}
+  html {{ background: transparent !important; }}
   #capture-btn {{
     background: linear-gradient(135deg,#667eea,#764ba2);
     color: #fff; border: none; padding: 10px 24px;
     border-radius: 8px; font-size: 14px;
     cursor: pointer; width: 100%; font-weight: 500;
+    transition: opacity 0.2s;
   }}
   #capture-btn:disabled {{ opacity: 0.7; cursor: wait; }}
+  #capture-status {{
+    color: #666; font-size: 12px; margin: 4px 0 0 0;
+    min-height: 16px;
+  }}
 </style>
-<div style="text-align:center; padding:8px;">
+<div style="text-align:center;">
     <button id="capture-btn" onclick="captureReport()">
         &#128248; Export Screenshot
     </button>
-    <p id="capture-status" style="color:#666; font-size:12px; margin-top:6px; display:none;"></p>
+    <p id="capture-status"></p>
 </div>
 <div id="report-render-area" style="position:absolute; left:-9999px; top:0; width:1200px; background:#fff;"></div>
 <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
@@ -1217,7 +1224,6 @@ function captureReport() {{
     var status = document.getElementById('capture-status');
     var renderArea = document.getElementById('report-render-area');
 
-    status.style.display = 'block';
     btn.disabled = true;
     btn.innerHTML = '&#9203; Generating...';
     status.textContent = 'Rendering report, please wait...';
@@ -1254,4 +1260,4 @@ function captureReport() {{
 }}
 </script>
 '''
-    st.components.v1.html(screenshot_component, height=80)
+    st.components.v1.html(screenshot_component, height=50)
