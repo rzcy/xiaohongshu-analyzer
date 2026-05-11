@@ -1185,18 +1185,33 @@ if "analysis_result" in st.session_state:
     report_b64 = base64.b64encode(html_report.encode('utf-8')).decode('utf-8')
 
     screenshot_component = f'''
+<style>
+  #capture-btn {{
+    background: linear-gradient(135deg,#667eea,#764ba2);
+    color: #fff; border: none; padding: 10px 24px;
+    border-radius: 8px; font-size: 14px;
+    cursor: pointer; width: 100%; font-weight: 500;
+  }}
+  #capture-btn:disabled {{ opacity: 0.7; cursor: wait; }}
+</style>
 <div style="text-align:center; padding:8px;">
-    <button id="capture-btn" onclick="captureReport()"
-            style="background:linear-gradient(135deg,#667eea,#764ba2); color:#fff;
-                   border:none; padding:10px 24px; border-radius:8px; font-size:14px;
-                   cursor:pointer; width:100%; font-weight:500;">
-        📸 导出报告截图
+    <button id="capture-btn" onclick="captureReport()">
+        \ud83d\udcf8 \u5bfc\u51fa\u62a5\u544a\u622a\u56fe
     </button>
     <p id="capture-status" style="color:#666; font-size:12px; margin-top:6px; display:none;"></p>
 </div>
-<div id="report-render-area" style="position:absolute; left:-9999px; top:0; width:1200px;"></div>
+<div id="report-render-area" style="position:absolute; left:-9999px; top:0; width:1200px; background:#fff;"></div>
 <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
 <script>
+function b64ToUtf8(b64) {{
+    var binStr = atob(b64);
+    var bytes = new Uint8Array(binStr.length);
+    for (var i = 0; i < binStr.length; i++) {{
+        bytes[i] = binStr.charCodeAt(i);
+    }}
+    return new TextDecoder('utf-8').decode(bytes);
+}}
+
 function captureReport() {{
     var btn = document.getElementById('capture-btn');
     var status = document.getElementById('capture-status');
@@ -1204,15 +1219,14 @@ function captureReport() {{
 
     status.style.display = 'block';
     btn.disabled = true;
-    btn.textContent = '⏳ 正在生成截图...';
-    status.textContent = '正在渲染，请稍候...';
+    btn.innerHTML = '\u23f3 \u6b63\u5728\u751f\u6210\u622a\u56fe...';
+    status.textContent = '\u6b63\u5728\u6e32\u67d3\uff0c\u8bf7\u7a0d\u5019...';
     status.style.color = '#666';
 
-    // 从 base64 解码 HTML 内容
-    var htmlContent = atob('{report_b64}');
+    // 用 TextDecoder 正确解码 UTF-8
+    var htmlContent = b64ToUtf8('{report_b64}');
     renderArea.innerHTML = htmlContent;
 
-    // 等待内容渲染
     setTimeout(function() {{
         html2canvas(renderArea, {{
             scale: 2,
@@ -1223,21 +1237,21 @@ function captureReport() {{
             width: 1200
         }}).then(function(canvas) {{
             var link = document.createElement('a');
-            link.download = '爆款拆解报告.png';
+            link.download = '\u7206\u6b3e\u62c6\u89e3\u62a5\u544a.png';
             link.href = canvas.toDataURL('image/png');
             link.click();
             btn.disabled = false;
-            btn.textContent = '📸 导出报告截图';
-            status.textContent = '✅ 截图已下载！';
+            btn.innerHTML = '\ud83d\udcf8 \u5bfc\u51fa\u62a5\u544a\u622a\u56fe';
+            status.textContent = '\u2705 \u622a\u56fe\u5df2\u4e0b\u8f7d\uff01';
             status.style.color = '#10b981';
         }}).catch(function(err) {{
             btn.disabled = false;
-            btn.textContent = '📸 导出报告截图';
-            status.textContent = '❌ 失败：' + err.message;
+            btn.innerHTML = '\ud83d\udcf8 \u5bfc\u51fa\u62a5\u544a\u622a\u56fe';
+            status.textContent = '\u274c \u5931\u8d25\uff1a' + err.message;
             status.style.color = '#ef4444';
         }});
-    }}, 500);
+    }}, 800);
 }}
 </script>
 '''
-    st.components.v1.html(screenshot_component, height=70)
+    st.components.v1.html(screenshot_component, height=80)
