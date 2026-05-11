@@ -686,7 +686,7 @@ def generate_html_report(title, author, likes, collects, comments, shares,
 
     <!-- 数据指标 -->
     <div class="metrics-bar">
-        <div class="metric"><div class="value">{score}</div><div class="label">爆款指数</div></div>
+        <div class="metric"><div class="value">{score}</div><div class="label">互动热度</div></div>
         <div class="metric"><div class="value">{likes:,}</div><div class="label">点赞</div></div>
         <div class="metric"><div class="value">{collects:,}</div><div class="label">收藏</div></div>
         <div class="metric"><div class="value">{comments:,}</div><div class="label">评论</div></div>
@@ -1065,7 +1065,7 @@ if "analysis_result" in st.session_state:
     # ---- 爆款指数 ----
     if likes + collects + comments > 0:
         col1, col2, col3, col4, col5 = st.columns(5)
-        col1.metric("爆款指数", score)
+        col1.metric("互动热度", score)
         col2.metric("点赞", f"{likes:,}")
         col3.metric("收藏", f"{collects:,}")
         col4.metric("评论", f"{comments:,}")
