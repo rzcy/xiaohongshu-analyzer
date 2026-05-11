@@ -456,7 +456,7 @@ def generate_html_report(title, author, likes, collects, comments, shares,
                 action_items += f'<li><span class="action-text">{action}</span></li>'
         actions_html = f"""
     <div class="actions-section">
-        <h2>🎯 你现在最该做的3件事</h2>
+        <h2>🎯 接下来可以这样优化</h2>
         <ol class="action-list">{action_items}</ol>
     </div>"""
 
@@ -1147,9 +1147,9 @@ if "analysis_result" in st.session_state:
 
     st.markdown("---")
 
-    # --- 第二层：你现在最该做的3件事 ---
+    # --- 第二层：优化建议 ---
     if exec_summary["top3_actions"]:
-        st.markdown("### 🎯 你现在最该做的3件事")
+        st.markdown("### 🎯 接下来可以这样优化")
         for i, action in enumerate(exec_summary["top3_actions"], 1):
             st.markdown(f"**{i}.** {action}")
         st.markdown("---")
@@ -1186,28 +1186,22 @@ if "analysis_result" in st.session_state:
 
     screenshot_component = f'''
 <style>
-  body {{ margin: 0; padding: 0; background: transparent !important; overflow: hidden; }}
-  html {{ background: transparent !important; }}
+  * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+  html, body {{ background: transparent !important; overflow: hidden; height: 40px; }}
   #capture-btn {{
     background: linear-gradient(135deg,#667eea,#764ba2);
-    color: #fff; border: none; padding: 10px 24px;
-    border-radius: 8px; font-size: 14px;
+    color: #fff; border: none; padding: 8px 20px;
+    border-radius: 8px; font-size: 13px;
     cursor: pointer; width: 100%; font-weight: 500;
-    transition: opacity 0.2s;
   }}
-  #capture-btn:disabled {{ opacity: 0.7; cursor: wait; }}
-  #capture-status {{
-    color: #666; font-size: 12px; margin: 4px 0 0 0;
-    min-height: 16px;
-  }}
+  #capture-btn:disabled {{ opacity: 0.6; cursor: wait; }}
 </style>
-<div style="text-align:center;">
+<div>
     <button id="capture-btn" onclick="captureReport()">
         &#128248; Export Screenshot
     </button>
-    <p id="capture-status"></p>
 </div>
-<div id="report-render-area" style="position:absolute; left:-9999px; top:0; width:1200px; background:#fff;"></div>
+<div id="report-render-area" style="position:fixed; left:-9999px; top:0; width:1200px; background:#fff; z-index:-1;"></div>
 <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
 <script>
 function b64ToUtf8(b64) {{
@@ -1221,13 +1215,10 @@ function b64ToUtf8(b64) {{
 
 function captureReport() {{
     var btn = document.getElementById('capture-btn');
-    var status = document.getElementById('capture-status');
     var renderArea = document.getElementById('report-render-area');
 
     btn.disabled = true;
     btn.innerHTML = '&#9203; Generating...';
-    status.textContent = 'Rendering report, please wait...';
-    status.style.color = '#666';
 
     // 用 TextDecoder 正确解码 UTF-8
     var htmlContent = b64ToUtf8('{report_b64}');
@@ -1248,16 +1239,12 @@ function captureReport() {{
             link.click();
             btn.disabled = false;
             btn.innerHTML = '&#128248; Export Screenshot';
-            status.textContent = 'Done! Screenshot downloaded.';
-            status.style.color = '#10b981';
         }}).catch(function(err) {{
             btn.disabled = false;
             btn.innerHTML = '&#128248; Export Screenshot';
-            status.textContent = 'Failed: ' + err.message;
-            status.style.color = '#ef4444';
         }});
     }}, 800);
 }}
 </script>
 '''
-    st.components.v1.html(screenshot_component, height=50)
+    st.components.v1.html(screenshot_component, height=40)
