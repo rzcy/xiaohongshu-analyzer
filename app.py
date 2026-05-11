@@ -826,6 +826,14 @@ json_input = st.text_area(
 )
 btn = st.button("🚀 开始拆解", use_container_width=True, type="primary")
 
+# ============ 缓存 OpenAI 客户端 ============
+@st.cache_resource
+def get_openai_client(_api_key: str, _base_url: str):
+    """缓存 OpenAI 客户端实例，避免每次 rerun 重建连接"""
+    base = f"{_base_url}/v1" if not _base_url.endswith("/v1") else _base_url
+    return OpenAI(api_key=_api_key, base_url=base)
+
+
 # ============ 分析流程 ============
 if btn:
     if not json_input.strip():
@@ -835,42 +843,23 @@ if btn:
         st.error("请在左侧填写 DeepSeek API Key")
         st.stop()
 
-    # TODO: 登录注册功能暂时关闭，后续恢复
-    # if AUTH_ENABLED:
-    #     user = get_current_user()
-    #     if not user:
-    #         st.warning("🔒 请先登录或注册（注册即送 10 次免费分析）")
-    #         st.stop()
-    #     remaining = check_quota(user["id"])
-    #     if remaining <= 0:
-    #         st.error("😢 免费次数已用完（10/10），请联系获取更多额度")
-    #         st.stop()
+    # 清除旧结果
+    if "analysis_result" in st.session_state:
+        del st.session_state["analysis_result"]
 
     data = parse_input(json_input)
     if not data:
         st.error("无法识别粘贴的内容，请确认是通过书签提取的数据")
         st.stop()
 
-    # ---- 自动计算发布时间 ----
+    # ---- 计算所有指标 ----
     hours = extract_hours_from_timestamp(data.get("time"))
+    has_time = hours is not None
     if hours is None:
         hours = 48
-        st.caption("⏰ 未检测到发布时间，使用默认值48小时计算爆款指数")
-    else:
-        if hours < 24:
-            st.caption(f"⏰ 发布于约 {hours:.0f} 小时前")
-        else:
-            days = hours / 24
-            st.caption(f"⏰ 发布于约 {days:.1f} 天前")
 
-    # ---- 基础信息 ----
-    st.markdown("---")
     title = data.get("title", "无标题")
     author = data.get("author", "")
-    st.markdown(f"### 📝 {title}")
-    if author:
-        st.caption(f"作者：{author}")
-
     likes = int(data.get("likes", 0))
     collects = int(data.get("collects", 0))
     comments = int(data.get("comments", 0))
@@ -880,77 +869,16 @@ if btn:
     image_count = len(images) if images else int(data.get("imageCount", 0))
     video = data.get("video", None)
 
-    # ---- 爆款指数 ----
+    score = 0
+    level = "数据不足"
     if likes + collects + comments > 0:
         score = calc_viral_score(likes, collects, comments, hours)
         level = get_level(score)
 
-        col1, col2, col3, col4, col5 = st.columns(5)
-        col1.metric("爆款指数", score)
-        col2.metric("点赞", f"{likes:,}")
-        col3.metric("收藏", f"{collects:,}")
-        col4.metric("评论", f"{comments:,}")
-        col5.metric("分享", f"{shares:,}")
-        st.caption(level)
-    else:
-        score = 0
-        level = "数据不足"
-
-    # ---- 媒体展示 ----
-    img_urls = [img.get("url", "") for img in images if img.get("url")] if images else []
-    has_video = video and video.get("url")
-
-    if img_urls or has_video:
-        media_label = f"🖼️ 媒体内容（{len(img_urls)}张图{'、含视频' if has_video else ''}）"
-        with st.expander(media_label, expanded=False):
-            st.caption("⚠️ 媒体来自小红书CDN，链接有时效性")
-            # 图片画廊
-            if img_urls:
-                for row_start in range(0, len(img_urls), 3):
-                    row_imgs = img_urls[row_start:row_start + 3]
-                    cols = st.columns(3)
-                    for idx, url in enumerate(row_imgs):
-                        with cols[idx]:
-                            st.markdown(
-                                f'<img src="{url}" referrerpolicy="no-referrer" '
-                                f'style="width:100%;border-radius:8px;" />',
-                                unsafe_allow_html=True
-                            )
-            # 视频播放
-            if has_video:
-                duration = video.get("duration", 0)
-                height = video.get("height", 0)
-                info_parts = []
-                if duration:
-                    minutes, seconds = divmod(int(duration), 60)
-                    info_parts.append(f"时长 {minutes}:{seconds:02d}")
-                if height:
-                    info_parts.append(f"分辨率 {height}p")
-                if info_parts:
-                    st.caption("视频：" + " | ".join(info_parts))
-                try:
-                    st.video(video["url"])
-                except Exception:
-                    st.info("视频加载失败（链接可能已过期）")
-
-    # ---- 数据洞察（纯算法，不依赖 AI） ----
     engagement_insights = analyze_engagement(likes, collects, comments, shares)
     content_traits = get_content_type_analysis(likes, collects, comments, note_type, image_count)
 
-    insight_summary = f"{len(engagement_insights)}条互动洞察、{len(content_traits)}条内容特征" if (engagement_insights or content_traits) else "数据不足"
-    with st.expander(f"📊 数据洞察（{insight_summary}）", expanded=False):
-        if engagement_insights:
-            for emoji_title, detail in engagement_insights:
-                st.markdown(f"**{emoji_title}**　{detail}")
-        else:
-            st.info("互动数据不足，暂无法生成数据洞察")
-        if content_traits:
-            st.markdown("**内容特征：**" + "　|　".join(content_traits))
-
-    # ---- AI 拆解（三层增强） ----
-    st.markdown("---")
-    st.markdown("### 🤖 AI 深度拆解（增强版）")
-
+    # ---- AI 拆解 ----
     tags = data.get("tags", [])
     tag_str = ", ".join(tags) if tags else "无"
     data_traits_str = "; ".join([t for _, t in engagement_insights] + content_traits) if (engagement_insights or content_traits) else "无明显特征"
@@ -1002,7 +930,6 @@ if btn:
             dimensions=dims_param,
         )
     except TypeError:
-        # 兼容旧版 knowledge_base.py（无 dimensions 参数）
         messages = get_full_prompt(
             title=title,
             content=data.get("content", ""),
@@ -1018,8 +945,7 @@ if btn:
 
     with st.spinner("AI 深度分析中（三层增强），约 20 秒..."):
         try:
-            base = f"{api_base}/v1" if not api_base.endswith("/v1") else api_base
-            client = OpenAI(api_key=api_key, base_url=base)
+            client = get_openai_client(api_key, api_base)
             resp = client.chat.completions.create(
                 model=model,
                 messages=messages,
@@ -1028,20 +954,16 @@ if btn:
             )
             ai_result = resp.choices[0].message.content
 
-            # TODO: 登录注册功能暂时关闭，后续恢复
-            # if AUTH_ENABLED and get_current_user():
-            #     consume_quota(get_current_user()["id"], title)
-
-            # === 三层金字塔展示 ===
+            # 解析结果
             try:
                 exec_summary = parse_executive_summary(ai_result)
             except Exception:
                 exec_summary = {"score": None, "score_max": 5000, "score_detail": "", "summary": "", "top3_actions": []}
 
-            # 降级兼容：从 parse_ai_sections 提取 fallback 数据
             sections = parse_ai_sections(ai_result)
+
+            # 降级兼容
             if exec_summary["score"] is None and sections:
-                # 尝试从选题评分维度提取分数作为替代
                 import re as _re
                 _score_text = sections.get("📋 选题评分", "")
                 _sm = _re.search(r'(\d+(?:\.\d+)?)\s*/\s*10', _score_text)
@@ -1053,62 +975,13 @@ if btn:
                         pass
 
             if not exec_summary["top3_actions"] and sections:
-                # 尝试从行动建议维度提取前3条
                 import re as _re
                 _advice_text = sections.get("💡 行动建议", "")
                 _actions = _re.findall(r'\d+[.\、]\s*(.+)', _advice_text)
                 if _actions:
                     exec_summary["top3_actions"] = [a.strip()[:80] for a in _actions[:3]]
 
-            # --- 第一层：爆款指数 + 一句话总结（始终可见） ---
-            if exec_summary["score"] is not None:
-                score_val = exec_summary["score"]
-                score_max = exec_summary["score_max"]
-                score_pct = score_val / score_max if score_max > 0 else 0
-
-                st.markdown("### 🔥 爆款指数")
-                col_score, col_detail = st.columns([1, 2])
-                with col_score:
-                    color = '#ff4b4b' if score_pct >= 0.8 else '#ffa500' if score_pct >= 0.6 else '#666'
-                    st.markdown(
-                        f"<h1 style='margin:0; color: {color};'>{score_val} "
-                        f"<span style='font-size:0.5em; color:#999'>/ {score_max}</span></h1>",
-                        unsafe_allow_html=True
-                    )
-                with col_detail:
-                    st.progress(min(score_pct, 1.0))
-                    if exec_summary["score_detail"]:
-                        st.caption(exec_summary["score_detail"])
-
-            if exec_summary["summary"]:
-                st.markdown(f"> **{exec_summary['summary']}**")
-
-            st.markdown("---")
-
-            # --- 第二层：你现在最该做的3件事（始终可见） ---
-            if exec_summary["top3_actions"]:
-                st.markdown("### 🎯 你现在最该做的3件事")
-                for i, action in enumerate(exec_summary["top3_actions"], 1):
-                    st.markdown(f"**{i}.** {action}")
-                st.markdown("---")
-
-            # --- 第三层：完整分析报告（折叠） ---
-            with st.expander("📊 查看完整分析报告（点击展开）", expanded=False):
-                tab_order = ["📋 选题评分", "📝 标题拆解", "🖼️ 封面策略",
-                             "📚 内容结构", "💬 互动设计", "🔍 算法适配", "💡 行动建议"]
-                available_tabs = [t for t in tab_order if t in sections]
-
-                if available_tabs:
-                    tabs = st.tabs(available_tabs)
-                    for tab, tab_name in zip(tabs, available_tabs):
-                        with tab:
-                            st.markdown(sections[tab_name])
-                else:
-                    # fallback: 直接显示原始AI输出
-                    st.markdown(ai_result)
-
-            # ---- 导出报告 ----
-            st.markdown("---")
+            # 生成 HTML 报告
             html_report = generate_html_report(
                 title=title, author=author,
                 likes=likes, collects=collects, comments=comments, shares=shares,
@@ -1120,58 +993,251 @@ if btn:
                 exec_summary=exec_summary,
             )
 
-            # ---- 导出按钮区域 ----
-            export_col1, export_col2 = st.columns(2)
-
-            with export_col1:
-                st.download_button(
-                    label="📥 导出 HTML 报告",
-                    data=html_report,
-                    file_name=f"爆款拆解_{title[:20]}.html",
-                    mime="text/html",
-                    use_container_width=True,
-                )
-
-            with export_col2:
-                if st.button("📸 导出报告截图", use_container_width=True, key="export_png"):
-                    st.session_state["show_screenshot_preview"] = True
-
-            # 截图：使用 html2canvas 客户端方案，加载后自动截图下载
-            if st.session_state.get("show_screenshot_preview"):
-                screenshot_component = f'''
-                <div id="report-content" style="position:absolute; left:-9999px; top:0; width:1200px; background:#fff; padding:20px;">
-                    {html_report}
-                </div>
-                <div id="status-box" style="text-align:center; padding:40px 20px;">
-                    <p id="status-text" style="color:#666; font-size:16px;">⏳ 正在生成截图，请稍候...</p>
-                </div>
-                <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
-                <script>
-                window.onload = function() {{{{
-                    var element = document.getElementById('report-content');
-                    var status = document.getElementById('status-text');
-                    html2canvas(element, {{{{
-                        scale: 2,
-                        useCORS: true,
-                        allowTaint: true,
-                        backgroundColor: '#ffffff',
-                        logging: false,
-                        width: 1200
-                    }}}}).then(function(canvas) {{{{
-                        var link = document.createElement('a');
-                        link.download = '爆款拆解报告.png';
-                        link.href = canvas.toDataURL('image/png');
-                        link.click();
-                        status.textContent = '✅ 截图已生成并开始下载！';
-                        status.style.color = '#10b981';
-                    }}}}).catch(function(err) {{{{
-                        status.textContent = '❌ 截图失败：' + err.message;
-                        status.style.color = '#ef4444';
-                    }}}});
-                }}}};
-                </script>
-                '''
-
-                st.components.v1.html(screenshot_component, height=100, scrolling=False)
+            # 存入 session_state
+            st.session_state["analysis_result"] = {
+                "ai_result": ai_result,
+                "exec_summary": exec_summary,
+                "sections": sections,
+                "html_report": html_report,
+                "title": title,
+                "author": author,
+                "likes": likes,
+                "collects": collects,
+                "comments": comments,
+                "shares": shares,
+                "score": score,
+                "level": level,
+                "hours": hours,
+                "engagement_insights": engagement_insights,
+                "content_traits": content_traits,
+                "note_type": note_type,
+                "image_count": image_count,
+                "images": images,
+                "video": video,
+                "category": category,
+                "has_time": has_time,
+            }
         except Exception as e:
             st.error(f"分析失败：{e}")
+
+# ============ 展示结果（从 session_state 读取，rerun 后仍可见） ============
+if "analysis_result" in st.session_state:
+    result = st.session_state["analysis_result"]
+
+    # 取出所有展示数据
+    title = result["title"]
+    author = result["author"]
+    likes = result["likes"]
+    collects = result["collects"]
+    comments = result["comments"]
+    shares = result["shares"]
+    score = result["score"]
+    level = result["level"]
+    hours = result["hours"]
+    engagement_insights = result["engagement_insights"]
+    content_traits = result["content_traits"]
+    note_type = result["note_type"]
+    image_count = result["image_count"]
+    images = result["images"]
+    video = result["video"]
+    ai_result = result["ai_result"]
+    exec_summary = result["exec_summary"]
+    sections = result["sections"]
+    html_report = result["html_report"]
+
+    # ---- 发布时间 ----
+    has_time = result.get("has_time", True)
+    if not has_time:
+        st.caption("⏰ 未检测到发布时间，使用默认值48小时计算爆款指数")
+    else:
+        if hours < 24:
+            st.caption(f"⏰ 发布于约 {hours:.0f} 小时前")
+        else:
+            days = hours / 24
+            st.caption(f"⏰ 发布于约 {days:.1f} 天前")
+
+    # ---- 基础信息 ----
+    st.markdown("---")
+    st.markdown(f"### 📝 {title}")
+    if author:
+        st.caption(f"作者：{author}")
+
+    # ---- 爆款指数 ----
+    if likes + collects + comments > 0:
+        col1, col2, col3, col4, col5 = st.columns(5)
+        col1.metric("爆款指数", score)
+        col2.metric("点赞", f"{likes:,}")
+        col3.metric("收藏", f"{collects:,}")
+        col4.metric("评论", f"{comments:,}")
+        col5.metric("分享", f"{shares:,}")
+        st.caption(level)
+
+    # ---- 媒体展示 ----
+    img_urls = [img.get("url", "") for img in images if img.get("url")] if images else []
+    has_video = video and video.get("url")
+
+    if img_urls or has_video:
+        media_label = f"🖼️ 媒体内容（{len(img_urls)}张图{'、含视频' if has_video else ''}）"
+        with st.expander(media_label, expanded=False):
+            st.caption("⚠️ 媒体来自小红书CDN，链接有时效性")
+            if img_urls:
+                for row_start in range(0, len(img_urls), 3):
+                    row_imgs = img_urls[row_start:row_start + 3]
+                    cols = st.columns(3)
+                    for idx, url in enumerate(row_imgs):
+                        with cols[idx]:
+                            st.markdown(
+                                f'<img src="{url}" referrerpolicy="no-referrer" '
+                                f'style="width:100%;border-radius:8px;" />',
+                                unsafe_allow_html=True
+                            )
+            if has_video:
+                duration = video.get("duration", 0)
+                height = video.get("height", 0)
+                info_parts = []
+                if duration:
+                    minutes, seconds = divmod(int(duration), 60)
+                    info_parts.append(f"时长 {minutes}:{seconds:02d}")
+                if height:
+                    info_parts.append(f"分辨率 {height}p")
+                if info_parts:
+                    st.caption("视频：" + " | ".join(info_parts))
+                try:
+                    st.video(video["url"])
+                except Exception:
+                    st.info("视频加载失败（链接可能已过期）")
+
+    # ---- 数据洞察 ----
+    insight_summary = f"{len(engagement_insights)}条互动洞察、{len(content_traits)}条内容特征" if (engagement_insights or content_traits) else "数据不足"
+    with st.expander(f"📊 数据洞察（{insight_summary}）", expanded=False):
+        if engagement_insights:
+            for emoji_title, detail in engagement_insights:
+                st.markdown(f"**{emoji_title}**　{detail}")
+        else:
+            st.info("互动数据不足，暂无法生成数据洞察")
+        if content_traits:
+            st.markdown("**内容特征：**" + "　|　".join(content_traits))
+
+    # ---- AI 深度拆解展示 ----
+    st.markdown("---")
+    st.markdown("### 🤖 AI 深度拆解（增强版）")
+
+    # --- 第一层：爆款指数 + 一句话总结 ---
+    if exec_summary["score"] is not None:
+        score_val = exec_summary["score"]
+        score_max = exec_summary["score_max"]
+        score_pct = score_val / score_max if score_max > 0 else 0
+
+        st.markdown("### 🔥 爆款指数")
+        col_score, col_detail = st.columns([1, 2])
+        with col_score:
+            color = '#ff4b4b' if score_pct >= 0.8 else '#ffa500' if score_pct >= 0.6 else '#666'
+            st.markdown(
+                f"<h1 style='margin:0; color: {color};'>{score_val} "
+                f"<span style='font-size:0.5em; color:#999'>/ {score_max}</span></h1>",
+                unsafe_allow_html=True
+            )
+        with col_detail:
+            st.progress(min(score_pct, 1.0))
+            if exec_summary["score_detail"]:
+                st.caption(exec_summary["score_detail"])
+
+    if exec_summary["summary"]:
+        st.markdown(f"> **{exec_summary['summary']}**")
+
+    st.markdown("---")
+
+    # --- 第二层：你现在最该做的3件事 ---
+    if exec_summary["top3_actions"]:
+        st.markdown("### 🎯 你现在最该做的3件事")
+        for i, action in enumerate(exec_summary["top3_actions"], 1):
+            st.markdown(f"**{i}.** {action}")
+        st.markdown("---")
+
+    # --- 第三层：完整分析报告（折叠） ---
+    with st.expander("📊 查看完整分析报告（点击展开）", expanded=False):
+        tab_order = ["📋 选题评分", "📝 标题拆解", "🖼️ 封面策略",
+                     "📚 内容结构", "💬 互动设计", "🔍 算法适配", "💡 行动建议"]
+        available_tabs = [t for t in tab_order if t in sections]
+
+        if available_tabs:
+            tabs = st.tabs(available_tabs)
+            for tab, tab_name in zip(tabs, available_tabs):
+                with tab:
+                    st.markdown(sections[tab_name])
+        else:
+            st.markdown(ai_result)
+
+    # ---- 导出区域 ----
+    st.markdown("---")
+
+    # 导出 HTML（st.download_button 不会触发 rerun）
+    st.download_button(
+        label="📥 导出 HTML 报告",
+        data=html_report,
+        file_name=f"爆款拆解_{title[:20]}.html",
+        mime="text/html",
+        use_container_width=True,
+    )
+
+    # 导出 PNG 截图（纯客户端 JS，不触发 rerun）
+    import base64
+    report_b64 = base64.b64encode(html_report.encode('utf-8')).decode('utf-8')
+
+    screenshot_component = f'''
+<div style="text-align:center; padding:8px;">
+    <button id="capture-btn" onclick="captureReport()"
+            style="background:linear-gradient(135deg,#667eea,#764ba2); color:#fff;
+                   border:none; padding:10px 24px; border-radius:8px; font-size:14px;
+                   cursor:pointer; width:100%; font-weight:500;">
+        📸 导出报告截图
+    </button>
+    <p id="capture-status" style="color:#666; font-size:12px; margin-top:6px; display:none;"></p>
+</div>
+<div id="report-render-area" style="position:absolute; left:-9999px; top:0; width:1200px;"></div>
+<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+<script>
+function captureReport() {{
+    var btn = document.getElementById('capture-btn');
+    var status = document.getElementById('capture-status');
+    var renderArea = document.getElementById('report-render-area');
+
+    status.style.display = 'block';
+    btn.disabled = true;
+    btn.textContent = '⏳ 正在生成截图...';
+    status.textContent = '正在渲染，请稍候...';
+    status.style.color = '#666';
+
+    // 从 base64 解码 HTML 内容
+    var htmlContent = atob('{report_b64}');
+    renderArea.innerHTML = htmlContent;
+
+    // 等待内容渲染
+    setTimeout(function() {{
+        html2canvas(renderArea, {{
+            scale: 2,
+            useCORS: true,
+            allowTaint: true,
+            backgroundColor: '#ffffff',
+            logging: false,
+            width: 1200
+        }}).then(function(canvas) {{
+            var link = document.createElement('a');
+            link.download = '爆款拆解报告.png';
+            link.href = canvas.toDataURL('image/png');
+            link.click();
+            btn.disabled = false;
+            btn.textContent = '📸 导出报告截图';
+            status.textContent = '✅ 截图已下载！';
+            status.style.color = '#10b981';
+        }}).catch(function(err) {{
+            btn.disabled = false;
+            btn.textContent = '📸 导出报告截图';
+            status.textContent = '❌ 失败：' + err.message;
+            status.style.color = '#ef4444';
+        }});
+    }}, 500);
+}}
+</script>
+'''
+    st.components.v1.html(screenshot_component, height=70)
