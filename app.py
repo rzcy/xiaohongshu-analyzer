@@ -1136,58 +1136,42 @@ if btn:
                 if st.button("📸 导出报告截图", use_container_width=True, key="export_png"):
                     st.session_state["show_screenshot_preview"] = True
 
-            # 截图预览和下载（使用 html2canvas 客户端方案）
+            # 截图：使用 html2canvas 客户端方案，加载后自动截图下载
             if st.session_state.get("show_screenshot_preview"):
-                import html as html_lib
-                # 将 HTML 报告内容转义后嵌入 JS
-                escaped_html = html_report.replace('\\', '\\\\').replace('`', '\\`').replace('${', '\\${')
-
                 screenshot_component = f'''
-                <div id="screenshot-container" style="background:#fff; padding:20px;">
-                    <div id="report-content">{html_report}</div>
+                <div id="report-content" style="position:absolute; left:-9999px; top:0; width:1200px; background:#fff; padding:20px;">
+                    {html_report}
                 </div>
-                <div style="text-align:center; margin:20px 0;">
-                    <button id="download-btn" onclick="captureAndDownload()"
-                            style="background:linear-gradient(135deg,#667eea,#764ba2); color:#fff;
-                                   border:none; padding:12px 32px; border-radius:8px; font-size:16px;
-                                   cursor:pointer; font-weight:bold;">
-                        📥 点击下载 PNG 截图
-                    </button>
-                    <p id="status-text" style="color:#666; margin-top:8px; font-size:14px;">点击按钮生成截图并下载</p>
+                <div id="status-box" style="text-align:center; padding:40px 20px;">
+                    <p id="status-text" style="color:#666; font-size:16px;">⏳ 正在生成截图，请稍候...</p>
                 </div>
                 <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
                 <script>
-                function captureAndDownload() {{{{
-                    var btn = document.getElementById('download-btn');
-                    var status = document.getElementById('status-text');
-                    btn.disabled = true;
-                    btn.textContent = '⏳ 正在生成截图...';
-                    status.textContent = '请稍候，正在渲染报告...';
-
+                window.onload = function() {{{{
                     var element = document.getElementById('report-content');
+                    var status = document.getElementById('status-text');
                     html2canvas(element, {{{{
                         scale: 2,
                         useCORS: true,
                         allowTaint: true,
                         backgroundColor: '#ffffff',
-                        logging: false
+                        logging: false,
+                        width: 1200
                     }}}}).then(function(canvas) {{{{
                         var link = document.createElement('a');
                         link.download = '爆款拆解报告.png';
                         link.href = canvas.toDataURL('image/png');
                         link.click();
-                        btn.disabled = false;
-                        btn.textContent = '📥 点击下载 PNG 截图';
-                        status.textContent = '✅ 截图已下载！';
+                        status.textContent = '✅ 截图已生成并开始下载！';
+                        status.style.color = '#10b981';
                     }}}}).catch(function(err) {{{{
-                        btn.disabled = false;
-                        btn.textContent = '📥 点击下载 PNG 截图';
                         status.textContent = '❌ 截图失败：' + err.message;
+                        status.style.color = '#ef4444';
                     }}}});
-                }}}}
+                }}}};
                 </script>
                 '''
 
-                st.components.v1.html(screenshot_component, height=800, scrolling=True)
+                st.components.v1.html(screenshot_component, height=100, scrolling=False)
         except Exception as e:
             st.error(f"分析失败：{e}")
