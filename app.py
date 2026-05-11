@@ -958,7 +958,7 @@ if btn:
             try:
                 exec_summary = parse_executive_summary(ai_result)
             except Exception:
-                exec_summary = {"score": None, "score_max": 5000, "score_detail": "", "summary": "", "top3_actions": []}
+                exec_summary = {"score": None, "score_max": 100, "score_detail": "", "summary": "", "top3_actions": []}
 
             sections = parse_ai_sections(ai_result)
 
@@ -969,8 +969,8 @@ if btn:
                 _sm = _re.search(r'(\d+(?:\.\d+)?)\s*/\s*10', _score_text)
                 if _sm:
                     try:
-                        exec_summary["score"] = int(float(_sm.group(1)) * 500)
-                        exec_summary["score_max"] = 5000
+                        exec_summary["score"] = int(float(_sm.group(1)) * 10)
+                        exec_summary["score_max"] = 100
                     except Exception:
                         pass
 
@@ -1186,65 +1186,42 @@ if "analysis_result" in st.session_state:
 
     screenshot_component = f'''
 <style>
-  * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-  html, body {{ background: transparent !important; overflow: hidden; height: 40px; }}
-  #capture-btn {{
-    background: linear-gradient(135deg,#667eea,#764ba2);
-    color: #fff; border: none; padding: 8px 20px;
-    border-radius: 8px; font-size: 13px;
-    cursor: pointer; width: 100%; font-weight: 500;
+  body {{ margin:0; padding:0; background:transparent !important; }}
+  .btn {{
+    background:linear-gradient(135deg,#667eea,#764ba2);
+    color:#fff; border:none; padding:8px 20px;
+    border-radius:8px; font-size:13px;
+    cursor:pointer; width:100%; font-weight:500;
   }}
-  #capture-btn:disabled {{ opacity: 0.6; cursor: wait; }}
+  .btn:disabled {{ opacity:0.6; cursor:wait; }}
 </style>
-<div>
-    <button id="capture-btn" onclick="captureReport()">
-        &#128248; Export Screenshot
-    </button>
-</div>
-<div id="report-render-area" style="position:fixed; left:-9999px; top:0; width:1200px; background:#fff; z-index:-1;"></div>
+<button class="btn" id="cbtn" onclick="doCapture()">&#128248; Export Screenshot</button>
 <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
 <script>
-function b64ToUtf8(b64) {{
-    var binStr = atob(b64);
-    var bytes = new Uint8Array(binStr.length);
-    for (var i = 0; i < binStr.length; i++) {{
-        bytes[i] = binStr.charCodeAt(i);
-    }}
-    return new TextDecoder('utf-8').decode(bytes);
-}}
-
-function captureReport() {{
-    var btn = document.getElementById('capture-btn');
-    var renderArea = document.getElementById('report-render-area');
-
-    btn.disabled = true;
-    btn.innerHTML = '&#9203; Generating...';
-
-    // 用 TextDecoder 正确解码 UTF-8
-    var htmlContent = b64ToUtf8('{report_b64}');
-    renderArea.innerHTML = htmlContent;
-
-    setTimeout(function() {{
-        html2canvas(renderArea, {{
-            scale: 2,
-            useCORS: true,
-            allowTaint: true,
-            backgroundColor: '#ffffff',
-            logging: false,
-            width: 1200
-        }}).then(function(canvas) {{
-            var link = document.createElement('a');
-            link.download = 'report.png';
-            link.href = canvas.toDataURL('image/png');
-            link.click();
-            btn.disabled = false;
-            btn.innerHTML = '&#128248; Export Screenshot';
-        }}).catch(function(err) {{
-            btn.disabled = false;
-            btn.innerHTML = '&#128248; Export Screenshot';
-        }});
-    }}, 800);
+function doCapture(){{
+  var btn=document.getElementById('cbtn');
+  btn.disabled=true; btn.textContent='Generating...';
+  // 创建离屏渲染容器
+  var box=document.createElement('div');
+  box.style.cssText='position:absolute;left:-9999px;top:0;width:1200px;background:#fff';
+  document.body.appendChild(box);
+  // 解码 UTF-8 HTML
+  var b=atob('{report_b64}');
+  var u=new Uint8Array(b.length);
+  for(var i=0;i<b.length;i++) u[i]=b.charCodeAt(i);
+  box.innerHTML=new TextDecoder('utf-8').decode(u);
+  setTimeout(function(){{
+    html2canvas(box,{{scale:2,useCORS:true,allowTaint:true,backgroundColor:'#fff',width:1200}}).then(function(c){{
+      var a=document.createElement('a');
+      a.download='report.png'; a.href=c.toDataURL('image/png'); a.click();
+      btn.disabled=false; btn.textContent='\u2705 Done - click again to re-export';
+      document.body.removeChild(box);
+    }}).catch(function(){{
+      btn.disabled=false; btn.textContent='Failed - click to retry';
+      document.body.removeChild(box);
+    }});
+  }},500);
 }}
 </script>
 '''
-    st.components.v1.html(screenshot_component, height=40)
+    st.components.v1.html(screenshot_component, height=36)
