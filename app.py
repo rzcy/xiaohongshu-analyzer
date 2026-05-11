@@ -246,6 +246,47 @@ def parse_input(text: str) -> dict:
     return None
 
 
+def parse_executive_summary(markdown_text: str) -> dict:
+    """从AI输出中提取前置摘要信息（爆款指数、一句话总结、Top3行动）"""
+    import re
+    result = {
+        "score": None,        # 如 "4223"
+        "score_max": 5000,
+        "score_detail": "",   # 括号内的计分说明
+        "summary": "",        # 一句话总结
+        "top3_actions": [],   # 3条行动建议列表
+    }
+
+    # 提取爆款指数部分
+    score_match = re.search(r'##\s*爆款指数\s*\n(.+?)(?=\n##|\Z)', markdown_text, re.DOTALL)
+    if score_match:
+        score_text = score_match.group(1).strip()
+        # 提取数字分数
+        num_match = re.search(r'(\d+)\s*/\s*(\d+)', score_text)
+        if num_match:
+            result["score"] = int(num_match.group(1))
+            result["score_max"] = int(num_match.group(2))
+        # 提取括号内说明
+        detail_match = re.search(r'[（(](.+?)[）)]', score_text)
+        if detail_match:
+            result["score_detail"] = detail_match.group(1)
+
+    # 提取一句话总结
+    summary_match = re.search(r'##\s*一句话总结\s*\n(.+?)(?=\n##|\Z)', markdown_text, re.DOTALL)
+    if summary_match:
+        result["summary"] = summary_match.group(1).strip()
+
+    # 提取3件事
+    actions_match = re.search(r'##\s*你现在最该做的3件事\s*\n(.+?)(?=\n##|\Z)', markdown_text, re.DOTALL)
+    if actions_match:
+        actions_text = actions_match.group(1).strip()
+        # 提取编号列表项
+        actions = re.findall(r'\d+\.\s*(.+)', actions_text)
+        result["top3_actions"] = actions[:3]
+
+    return result
+
+
 def parse_ai_sections(markdown_text: str) -> dict:
     """将 AI 返回的 Markdown 按 ## 分块，映射到各维度"""
     import re
@@ -344,55 +385,304 @@ def convert_md_to_html(md_text: str) -> str:
 
 def generate_html_report(title, author, likes, collects, comments, shares,
                          score, level, hours, engagement_insights,
-                         content_traits, ai_result, category) -> str:
-    """生成美观的 HTML 分析报告"""
+                         content_traits, ai_result, category,
+                         exec_summary=None) -> str:
+    """生成三层金字塔结构的 HTML 分析报告
+
+    三层结构：
+    1. 顶部醒目区域：爆款指数（大字+渐变进度条）+ 一句话总结
+    2. 行动建议区域：3条最该做的事
+    3. 完整分析区域：7维度分析展开
+    """
+    # 如果未传入 exec_summary，自行从 ai_result 中解析
+    if exec_summary is None:
+        try:
+            exec_summary = parse_executive_summary(ai_result)
+        except Exception:
+            exec_summary = {"score": None, "score_max": 5000, "score_detail": "",
+                            "summary": "", "top3_actions": []}
+
+    # 解析7维度分析
+    sections = parse_ai_sections(ai_result)
+
+    # 爆款指数数值
+    es_score = exec_summary.get("score")
+    es_max = exec_summary.get("score_max", 5000)
+    es_detail = exec_summary.get("score_detail", "")
+    es_summary = exec_summary.get("summary", "")
+    es_actions = exec_summary.get("top3_actions", [])
+    score_pct = (es_score / es_max * 100) if es_score and es_max else 0
+
+    # 进度条颜色
+    if score_pct >= 80:
+        bar_gradient = "linear-gradient(90deg, #ff416c, #ff4b2b)"
+        score_color = "#ff4b2b"
+    elif score_pct >= 60:
+        bar_gradient = "linear-gradient(90deg, #f7971e, #ffd200)"
+        score_color = "#f7971e"
+    else:
+        bar_gradient = "linear-gradient(90deg, #667eea, #764ba2)"
+        score_color = "#667eea"
+
+    # 构建爆款指数 Hero 区域
+    hero_score_html = ""
+    if es_score is not None:
+        hero_score_html = f"""
+        <div class="score-badge" style="color:{score_color}">{es_score} <span class="score-max">/ {es_max}</span></div>
+        <div class="score-bar-track">
+            <div class="score-bar-fill" style="width:{min(score_pct,100):.1f}%;background:{bar_gradient}"></div>
+        </div>
+        """
+        if es_detail:
+            hero_score_html += f'<p class="score-detail">{es_detail}</p>'
+
+    hero_summary_html = ""
+    if es_summary:
+        hero_summary_html = f'<blockquote class="summary">{es_summary}</blockquote>'
+
+    # 构建行动建议区域
+    actions_html = ""
+    if es_actions:
+        action_items = ""
+        for i, action in enumerate(es_actions, 1):
+            # 分离 "操作描述 → 预期效果" 格式
+            if "→" in action:
+                parts = action.split("→", 1)
+                action_items += f'<li><span class="action-text">{parts[0].strip()}</span><span class="action-arrow">→</span><span class="action-effect">{parts[1].strip()}</span></li>'
+            else:
+                action_items += f'<li><span class="action-text">{action}</span></li>'
+        actions_html = f"""
+    <div class="actions-section">
+        <h2>🎯 你现在最该做的3件事</h2>
+        <ol class="action-list">{action_items}</ol>
+    </div>"""
+
+    # 构建数据洞察
+    insights_html = ""
+    if engagement_insights:
+        insights_html = ''.join(
+            f'<div class="insight-card"><strong>{t}</strong><br>{d}</div>'
+            for t, d in engagement_insights
+        )
+    if content_traits:
+        insights_html += '<div class="traits"><h3>内容特征</h3><ul>' + ''.join(
+            f'<li>{t}</li>' for t in content_traits
+        ) + '</ul></div>'
+
+    # 构建7维度分析
+    tab_order = ["📋 选题评分", "📝 标题拆解", "🖼️ 封面策略",
+                 "📚 内容结构", "💬 互动设计", "🔍 算法适配", "💡 行动建议"]
+    analysis_cards = ""
+    for tab_name in tab_order:
+        if tab_name in sections:
+            content_html = convert_md_to_html(sections[tab_name])
+            analysis_cards += f"""
+        <div class="analysis-card">
+            <h3>{tab_name}</h3>
+            <div class="card-content">{content_html}</div>
+        </div>"""
+
+    if not analysis_cards:
+        # fallback: 直接渲染原始AI输出
+        analysis_cards = f'<div class="analysis-card"><div class="card-content">{convert_md_to_html(ai_result)}</div></div>'
 
     html = f"""<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>爆款拆解报告 - {title}</title>
     <style>
         * {{ margin: 0; padding: 0; box-sizing: border-box; }}
         body {{
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            line-height: 1.8; color: #333; background: #f8f9fa;
-            padding: 40px 20px;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
+                         'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+            line-height: 1.8; color: #2d3436; background: #f0f2f5;
+            padding: 40px 16px;
         }}
-        .container {{ max-width: 800px; margin: 0 auto; background: #fff;
-                     border-radius: 12px; box-shadow: 0 2px 12px rgba(0,0,0,0.08);
-                     padding: 48px; }}
-        .header {{ text-align: center; margin-bottom: 32px; padding-bottom: 24px;
-                  border-bottom: 2px solid #ff4757; }}
-        .header h1 {{ font-size: 24px; color: #ff4757; margin-bottom: 8px; }}
-        .header .subtitle {{ color: #666; font-size: 14px; }}
-        .metrics {{ display: flex; justify-content: space-around; margin: 24px 0;
-                   padding: 20px; background: #fff5f5; border-radius: 8px; }}
-        .metric {{ text-align: center; }}
-        .metric .value {{ font-size: 24px; font-weight: bold; color: #ff4757; }}
-        .metric .label {{ font-size: 12px; color: #666; margin-top: 4px; }}
-        .section {{ margin: 28px 0; }}
-        .section h2 {{ font-size: 18px; color: #333; margin-bottom: 12px;
-                      padding-left: 12px; border-left: 3px solid #ff4757; }}
-        .section h3 {{ font-size: 15px; color: #555; margin: 16px 0 8px; }}
-        .insight {{ background: #f8f9fa; padding: 12px 16px; border-radius: 6px;
-                   margin: 8px 0; border-left: 3px solid #ffa502; }}
-        .ai-content {{ white-space: pre-wrap; }}
-        .ai-content h2 {{ margin-top: 24px; }}
-        .footer {{ text-align: center; margin-top: 40px; padding-top: 20px;
-                  border-top: 1px solid #eee; color: #999; font-size: 12px; }}
-        strong {{ color: #333; }}
-        blockquote {{ border-left: 3px solid #ddd; padding-left: 12px; color: #666; margin: 8px 0; }}
+        .container {{ max-width: 840px; margin: 0 auto; }}
+
+        /* === Hero Section: 爆款指数 === */
+        .hero-section {{
+            background: linear-gradient(135deg, #fff 0%, #fdf2f8 100%);
+            border-radius: 16px;
+            padding: 40px 36px 32px;
+            box-shadow: 0 4px 24px rgba(0,0,0,0.06);
+            text-align: center;
+            margin-bottom: 20px;
+        }}
+        .hero-section .report-title {{
+            font-size: 22px; font-weight: 700; color: #1a1a2e;
+            margin-bottom: 4px;
+        }}
+        .hero-section .report-subtitle {{
+            font-size: 13px; color: #999; margin-bottom: 24px;
+        }}
+        .score-badge {{
+            font-size: 56px; font-weight: 800; letter-spacing: -2px;
+            margin-bottom: 8px;
+        }}
+        .score-max {{ font-size: 24px; font-weight: 400; color: #aaa; }}
+        .score-bar-track {{
+            width: 100%; max-width: 480px; height: 14px;
+            background: #e9ecef; border-radius: 7px;
+            margin: 12px auto; overflow: hidden;
+        }}
+        .score-bar-fill {{
+            height: 100%; border-radius: 7px;
+            transition: width 0.6s ease;
+        }}
+        .score-detail {{
+            font-size: 13px; color: #888; margin-top: 8px;
+        }}
+        .summary {{
+            margin: 20px auto 0; max-width: 600px;
+            font-size: 16px; font-style: italic; color: #555;
+            border-left: 4px solid #ff6b81; padding: 12px 20px;
+            background: rgba(255,107,129,0.06); border-radius: 0 8px 8px 0;
+            text-align: left;
+        }}
+
+        /* === 数据指标条 === */
+        .metrics-bar {{
+            display: flex; justify-content: space-around; flex-wrap: wrap;
+            background: #fff; border-radius: 12px;
+            padding: 20px 12px; margin-bottom: 20px;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.04);
+        }}
+        .metric {{ text-align: center; min-width: 80px; padding: 4px 8px; }}
+        .metric .value {{ font-size: 22px; font-weight: 700; color: #ff4757; }}
+        .metric .label {{ font-size: 12px; color: #999; margin-top: 2px; }}
+
+        /* === Actions Section === */
+        .actions-section {{
+            background: #fff; border-radius: 12px;
+            padding: 28px 32px; margin-bottom: 20px;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.04);
+        }}
+        .actions-section h2 {{
+            font-size: 18px; color: #1a1a2e; margin-bottom: 16px;
+        }}
+        .action-list {{
+            list-style: none; counter-reset: action-counter;
+            padding: 0;
+        }}
+        .action-list li {{
+            counter-increment: action-counter;
+            padding: 14px 16px 14px 52px;
+            margin: 10px 0; border-radius: 10px;
+            background: linear-gradient(135deg, #f8f9ff 0%, #f0f4ff 100%);
+            position: relative; font-size: 15px; line-height: 1.6;
+        }}
+        .action-list li::before {{
+            content: counter(action-counter);
+            position: absolute; left: 14px; top: 50%; transform: translateY(-50%);
+            width: 28px; height: 28px; border-radius: 50%;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: #fff; font-weight: 700; font-size: 14px;
+            display: flex; align-items: center; justify-content: center;
+        }}
+        .action-arrow {{
+            display: inline-block; margin: 0 8px;
+            color: #764ba2; font-weight: 700;
+        }}
+        .action-effect {{ color: #667eea; font-weight: 600; }}
+
+        /* === Data Insights Section === */
+        .insights-section {{
+            background: #fff; border-radius: 12px;
+            padding: 28px 32px; margin-bottom: 20px;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.04);
+        }}
+        .insights-section h2 {{
+            font-size: 18px; color: #1a1a2e; margin-bottom: 16px;
+        }}
+        .insight-card {{
+            background: #fafbfc; padding: 14px 18px; border-radius: 8px;
+            margin: 10px 0; border-left: 4px solid #ffa502;
+            font-size: 14px;
+        }}
+        .traits {{ margin-top: 16px; }}
+        .traits h3 {{ font-size: 15px; color: #555; margin-bottom: 8px; }}
+        .traits ul {{ padding-left: 20px; }}
+        .traits li {{ margin: 4px 0; font-size: 14px; }}
+
+        /* === Analysis Section === */
+        .analysis-section {{
+            background: #fff; border-radius: 12px;
+            padding: 28px 32px; margin-bottom: 20px;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.04);
+        }}
+        .analysis-section > h2 {{
+            font-size: 18px; color: #1a1a2e; margin-bottom: 20px;
+        }}
+        .analysis-card {{
+            border: 1px solid #eef0f2; border-radius: 10px;
+            padding: 20px 24px; margin: 16px 0;
+            background: #fafbfc;
+        }}
+        .analysis-card h3 {{
+            font-size: 16px; font-weight: 700; color: #333;
+            margin-bottom: 12px; padding-bottom: 8px;
+            border-bottom: 2px solid #ff4757;
+        }}
+        .card-content {{ font-size: 14px; line-height: 1.9; }}
+        .card-content h2 {{ font-size: 15px; color: #444; margin: 16px 0 8px; }}
+        .card-content h3 {{ font-size: 14px; color: #555; margin: 12px 0 6px;
+                           border-bottom: none; padding-bottom: 0; }}
+        .card-content strong {{ color: #1a1a2e; }}
+        .card-content li {{ margin: 4px 0; }}
+        .card-content blockquote {{
+            border-left: 3px solid #ddd; padding-left: 12px;
+            color: #666; margin: 8px 0;
+        }}
+
+        /* === Footer === */
+        .footer {{
+            text-align: center; padding: 24px 0 8px;
+            color: #bbb; font-size: 12px;
+        }}
+
+        /* === 响应式 === */
+        @media (max-width: 600px) {{
+            body {{ padding: 16px 8px; }}
+            .hero-section {{ padding: 28px 18px 24px; }}
+            .score-badge {{ font-size: 40px; }}
+            .score-max {{ font-size: 18px; }}
+            .actions-section, .insights-section, .analysis-section {{
+                padding: 20px 16px;
+            }}
+            .action-list li {{ padding: 12px 12px 12px 46px; font-size: 14px; }}
+            .metrics-bar {{ padding: 14px 8px; }}
+            .metric .value {{ font-size: 18px; }}
+            .analysis-card {{ padding: 16px; }}
+        }}
+
+        /* === 打印友好 === */
+        @media print {{
+            body {{ background: #fff; padding: 0; }}
+            .container {{ box-shadow: none; }}
+            .hero-section, .actions-section, .insights-section, .analysis-section {{
+                box-shadow: none; break-inside: avoid;
+            }}
+            .analysis-card {{ break-inside: avoid; }}
+            .action-list li {{ background: #f5f5f5; }}
+        }}
     </style>
 </head>
 <body>
 <div class="container">
-    <div class="header">
-        <h1>🔥 爆款拆解报告</h1>
-        <div class="subtitle">{title} | 作者：{author or '未知'}</div>
+
+    <!-- 第一层：爆款指数 + 一句话总结 -->
+    <div class="hero-section">
+        <div class="report-title">🔥 爆款拆解报告</div>
+        <div class="report-subtitle">{title} | 作者：{author or '未知'}</div>
+        {hero_score_html}
+        {hero_summary_html}
     </div>
 
-    <div class="metrics">
+    <!-- 数据指标 -->
+    <div class="metrics-bar">
         <div class="metric"><div class="value">{score}</div><div class="label">爆款指数</div></div>
         <div class="metric"><div class="value">{likes:,}</div><div class="label">点赞</div></div>
         <div class="metric"><div class="value">{collects:,}</div><div class="label">收藏</div></div>
@@ -400,19 +690,20 @@ def generate_html_report(title, author, likes, collects, comments, shares,
         <div class="metric"><div class="value">{shares:,}</div><div class="label">分享</div></div>
     </div>
 
-    <div class="section">
-        <h2>📊 数据洞察</h2>
-        {''.join(f'<div class="insight"><strong>{t}</strong><br>{d}</div>' for t, d in engagement_insights) if engagement_insights else '<p>互动数据不足</p>'}
-        {('<h3>内容特征</h3><ul>' + ''.join(f'<li>{t}</li>' for t in content_traits) + '</ul>') if content_traits else ''}
-    </div>
+    <!-- 第二层：行动建议 -->
+    {actions_html}
 
-    <div class="section">
-        <h2>🤖 AI 深度拆解</h2>
-        <div class="ai-content">{convert_md_to_html(ai_result)}</div>
+    <!-- 数据洞察 -->
+    {('<div class="insights-section"><h2>📊 数据洞察</h2>' + insights_html + '</div>') if insights_html else ''}
+
+    <!-- 第三层：完整7维度分析 -->
+    <div class="analysis-section">
+        <h2>📊 完整分析报告</h2>
+        {analysis_cards}
     </div>
 
     <div class="footer">
-        由「小红书爆款拆解器」生成 | {category or '通用'}品类
+        由「小红书爆款拆解器」生成 | {category or '通用'}品类 | {datetime.now().strftime('%Y-%m-%d %H:%M')}
     </div>
 </div>
 </body>
@@ -738,44 +1029,71 @@ if btn:
             if AUTH_ENABLED and get_current_user():
                 consume_quota(get_current_user()["id"], title)
 
-            # 解析 AI 结果
+            # === 三层金字塔展示 ===
+            try:
+                exec_summary = parse_executive_summary(ai_result)
+            except Exception:
+                exec_summary = {"score": None, "score_max": 5000, "score_detail": "", "summary": "", "top3_actions": []}
+
+            # 降级兼容：从 parse_ai_sections 提取 fallback 数据
             sections = parse_ai_sections(ai_result)
+            if exec_summary["score"] is None and sections:
+                # 尝试从选题评分维度提取分数作为替代
+                import re as _re
+                _score_text = sections.get("📋 选题评分", "")
+                _sm = _re.search(r'(\d+(?:\.\d+)?)\s*/\s*10', _score_text)
+                if _sm:
+                    try:
+                        exec_summary["score"] = int(float(_sm.group(1)) * 500)
+                        exec_summary["score_max"] = 5000
+                    except Exception:
+                        pass
 
-            if not sections:
-                # fallback：解析失败时直接展示原文
-                st.markdown(ai_result)
-            else:
-                # === 快速摘要卡 ===
-                ai_score, reason, recommendations = extract_summary_from_sections(sections)
+            if not exec_summary["top3_actions"] and sections:
+                # 尝试从行动建议维度提取前3条
+                import re as _re
+                _advice_text = sections.get("💡 行动建议", "")
+                _actions = _re.findall(r'\d+[.\、]\s*(.+)', _advice_text)
+                if _actions:
+                    exec_summary["top3_actions"] = [a.strip()[:80] for a in _actions[:3]]
 
-                # 摘要卡容器
-                st.markdown("#### 🎯 快速摘要")
-                col1, col2 = st.columns([1, 2])
+            # --- 第一层：爆款指数 + 一句话总结（始终可见） ---
+            if exec_summary["score"] is not None:
+                score_val = exec_summary["score"]
+                score_max = exec_summary["score_max"]
+                score_pct = score_val / score_max if score_max > 0 else 0
 
-                with col1:
-                    st.metric("AI 选题评分", f"{ai_score}/10")
-                    if reason:
-                        st.caption(reason)
+                st.markdown("### 🔥 爆款指数")
+                col_score, col_detail = st.columns([1, 2])
+                with col_score:
+                    color = '#ff4b4b' if score_pct >= 0.8 else '#ffa500' if score_pct >= 0.6 else '#666'
+                    st.markdown(
+                        f"<h1 style='margin:0; color: {color};'>{score_val} "
+                        f"<span style='font-size:0.5em; color:#999'>/ {score_max}</span></h1>",
+                        unsafe_allow_html=True
+                    )
+                with col_detail:
+                    st.progress(min(score_pct, 1.0))
+                    if exec_summary["score_detail"]:
+                        st.caption(exec_summary["score_detail"])
 
-                with col2:
-                    if recommendations:
-                        st.markdown("**💡 Top 行动建议：**")
-                        for i, rec in enumerate(recommendations, 1):
-                            st.markdown(f"{i}. {rec}")
-                    else:
-                        st.caption("暂未提取到行动建议")
+            if exec_summary["summary"]:
+                st.markdown(f"> **{exec_summary['summary']}**")
 
-                # === 标签页详情 ===
+            st.markdown("---")
+
+            # --- 第二层：你现在最该做的3件事（始终可见） ---
+            if exec_summary["top3_actions"]:
+                st.markdown("### 🎯 你现在最该做的3件事")
+                for i, action in enumerate(exec_summary["top3_actions"], 1):
+                    st.markdown(f"**{i}.** {action}")
                 st.markdown("---")
-                st.markdown("#### 📖 详细分析")
 
-                # 按固定顺序排列标签（行动建议已在摘要卡展示，不重复）
-                tab_order = ["📋 选题评分", "📝 标题拆解", "💬 互动设计",
-                             "📚 内容结构", "🔍 算法适配", "🖼️ 封面策略"]
+            # --- 第三层：完整分析报告（折叠） ---
+            with st.expander("📊 查看完整分析报告（点击展开）", expanded=False):
+                tab_order = ["📋 选题评分", "📝 标题拆解", "🖼️ 封面策略",
+                             "📚 内容结构", "💬 互动设计", "🔍 算法适配", "💡 行动建议"]
                 available_tabs = [t for t in tab_order if t in sections]
-                # 如果摘要卡未提取到建议，保留行动建议tab
-                if not recommendations and "💡 行动建议" in sections:
-                    available_tabs.append("💡 行动建议")
 
                 if available_tabs:
                     tabs = st.tabs(available_tabs)
@@ -783,10 +1101,10 @@ if btn:
                         with tab:
                             st.markdown(sections[tab_name])
                 else:
-                    # 标签也失败的 fallback
+                    # fallback: 直接显示原始AI输出
                     st.markdown(ai_result)
 
-            # ---- 导出 HTML 报告 ----
+            # ---- 导出报告 ----
             st.markdown("---")
             html_report = generate_html_report(
                 title=title, author=author,
@@ -796,13 +1114,34 @@ if btn:
                 content_traits=content_traits,
                 ai_result=ai_result,
                 category=category,
+                exec_summary=exec_summary,
             )
-            st.download_button(
-                label="📥 导出分析报告（HTML）",
-                data=html_report,
-                file_name=f"爆款拆解_{title[:20]}.html",
-                mime="text/html",
-                use_container_width=True,
-            )
+
+            export_col1, export_col2 = st.columns(2)
+            with export_col1:
+                st.download_button(
+                    label="📥 导出 HTML 报告",
+                    data=html_report,
+                    file_name=f"爆款拆解_{title[:20]}.html",
+                    mime="text/html",
+                    use_container_width=True,
+                )
+            with export_col2:
+                if st.button("📸 生成报告截图", use_container_width=True):
+                    try:
+                        from export_utils import html_to_screenshot
+                        with st.spinner("正在生成截图..."):
+                            screenshot_data = html_to_screenshot(html_report)
+                        st.download_button(
+                            label="📥 下载 PNG 截图",
+                            data=screenshot_data,
+                            file_name=f"爆款拆解_{title[:20]}.png",
+                            mime="image/png",
+                            use_container_width=True,
+                        )
+                    except ImportError:
+                        st.info("💡 PNG导出需要安装 selenium，本地开发可忽略")
+                    except Exception as e:
+                        st.warning(f"截图生成失败：{str(e)}")
         except Exception as e:
             st.error(f"分析失败：{e}")
